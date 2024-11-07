@@ -1,7 +1,6 @@
 package ajs.tools;
 
 import ij.*;
-//import ij.gui.GenericDialog;
 import ij.gui.Roi;
 import ij.gui.ShapeRoi;
 import ij.gui.StackWindow;
@@ -26,7 +25,7 @@ public class CellFinder implements PlugIn, KeyListener {
 	public static int MAX_CELL_SIZE=150000;
 	public static int MAX_ROI_SIZE=60000;
 	private long st;
-	boolean stop=false;
+	public volatile boolean stop=false;
 
 	@Override
 	public void run(String arg) {
@@ -35,9 +34,10 @@ public class CellFinder implements PlugIn, KeyListener {
 		RoiManager rm=RoiManager.getRoiManager();
 		Roi[] rois=rm.getRoisAsArray();
 		if(rois==null || rois.length==0) {
-			if(IJ.showMessageWithCancel("AP", "Running Analyze Particles first"))
+			if(IJ.showMessageWithCancel("AP", "Running Analyze Particles first")) {
 				IJ.run("Analyze Particles...", "  show=[Bare Outlines] include add stack");
-			else
+				rois=rm.getRoisAsArray();
+			}else
 				return;
 		}
 		

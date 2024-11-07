@@ -1,22 +1,23 @@
 package ajs.tools;
 import ij.plugin.PlugIn;
-import ij.text.TextPanel;
-import ij.text.TextWindow;
 import ij.util.Java2;
 import ij.gui.*;
 import ij.io.OpenDialog;
 import ij.*;
 
+import java.awt.Component;
 import java.awt.MenuItem;
 import java.awt.PopupMenu;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
 import java.io.*;
 import java.util.ArrayList;
 
+import javax.swing.JComponent;
 import javax.swing.JFileChooser;
-
-import java.time.LocalTime;
+import javax.swing.UIManager;
 
 /**
  * This is a template for a plugin that does not require one image
@@ -25,26 +26,8 @@ import java.time.LocalTime;
  */
 public class TwoPhoton_Import implements PlugIn {
 	
-	static boolean dozee=false,dogamma=Prefs.get("AJ.TwoPhoton_Import.dogamma", false),dotimes=Prefs.get("AJ.TwoPhoton_Import.dotimes", false),dopos=Prefs.get("AJ.TwoPhoton_Import.dopos", true);
-	
-	class FolderType{
-		public boolean oif, prairie, hastifs;
-		public int folders;
-		public FolderType(boolean oif, boolean prairie, boolean hastifs, int folders) {
-			this.oif=oif;
-			this.prairie=prairie;
-			this.hastifs=hastifs;
-			this.folders=folders;
-		}
-	}
-	static final FilenameFilter nohidden = new FilenameFilter(){
-			public boolean accept(File dir, String name){
-				return !(name.startsWith(".") || name.equals("Thumbs.db"));
-			}
-		};
-	static String webpath=Prefs.get("AJ.TwoPhoton_Import.webpath","C:\\Inetpub\\wwwroot\\");
-	
-	
+	private boolean isOif, isPrairie, hasTifs, hasFolders;
+	public static boolean debug;
 	
 	/**
 	 * This method gets called by ImageJ / Fiji.
@@ -58,7 +41,7 @@ public class TwoPhoton_Import implements PlugIn {
 		else if(arg.equals("printexloc")) {printExLoc(IJ.getDirectory("")); return;}
 		else if(arg.equals("printexlocspecial")) {printExLocSpecial(); return;}
 		else if(arg.equals("updateCurrentImage")) {updateCurrentImage();return;}
-		else if(arg.equals("startContinuousUpdate")) {updateCurrentImage();return;}
+		else if(arg.equals("startContinuousUpdate")) {startContinuousUpdate();return;}
 		else if(arg.equals("options")) {setOptions();return;}
 		else if(isDirectory(arg)) {openTwoPhoton(arg); return;}
 		else {
@@ -73,7 +56,7 @@ public class TwoPhoton_Import implements PlugIn {
 		else {
 			//String other="";
 			for(int i=0;i<dir.length;i++) {
-				openTwoPhoton(dir[i],true);
+				openTwoPhoton(dir[i],true, true);
 				//String title=openTwoPhoton(dir[i],true).getTitle();
 				//if(i==0)other+="  title="+title+"_CONCAT";
 				//other+=" image"+(i+1)+"=["+title+"]";
@@ -116,20 +99,54 @@ public class TwoPhoton_Import implements PlugIn {
 		return result;
 	}
 	
-	private FolderType folderType(File[] fl) {
-		boolean prairie=false,hastifs=false, oifdo=false;
-		int dcount=0;
+	class PrevFolderSelector extends JComponent implements PropertyChangeListener {
+		/**
+		 * 
+		 */
+		private static final long serialVersionUID = 1L;
+		JFileChooser fc;
+
+		public PrevFolderSelector(JFileChooser fc) {
+			this.fc=fc;
+			fc.addPropertyChangeListener(this);
+		}
+
+		public void propertyChange(PropertyChangeEvent e) {
+			String prop = e.getPropertyName();
+
+			if (JFileChooser.DIRECTORY_CHANGED_PROPERTY.equals(prop)) {
+				File oldDir = (File) e.getOldValue();
+				File newDir = (File) e.getNewValue();
+				if(newDir.getPath().equals(oldDir.getParent())) {
+					if(UIManager.getLookAndFeel().getName().equals("Windows") || UIManager.getLookAndFeel().getName().equals("Windows Classic")){
+						Component c=fc.findComponentAt(106,40);
+						if(c!=null && c instanceof JComponent){
+							c.requestFocusInWindow();
+						}
+					}
+					fc.setSelectedFile(oldDir);
+				}
+
+				//If a file became selected, find out which one.
+			} else if (JFileChooser.SELECTED_FILE_CHANGED_PROPERTY.equals(prop)) {
+				//file = (File) e.getNewValue();
+			}
+		}
+
+	}
+	
+	private void getFolderType(File[] fl) {
+		isOif=false; isPrairie=false; hasTifs=false; hasFolders=false;
 		for(int i=0;i<fl.length;i++){
 			String name=fl[i].getName();
-			if(name.endsWith(".xml") || name.endsWith(".cfg")) {oifdo=false; prairie=true; if(hastifs)break;}
+			if(name.endsWith(".xml") || name.endsWith(".cfg")) {isOif=false; isPrairie=true; if(hasTifs)break;}
 			if(name.endsWith(".tif")){
-				hastifs=true;
-				if(prairie) break;
-				if(name.startsWith("s_")) {oifdo=true; break;}
+				hasTifs=true;
+				if(isPrairie) break;
+				if(name.startsWith("s_")) {isOif=true; break;}
 			}
-			if(fl[i].isDirectory()) dcount++;
+			if(fl[i].isDirectory()) hasFolders=true;
 		}
-		return new FolderType(oifdo, prairie, hastifs, dcount);
 	}
 	
 	static boolean isDirectory(String dir) {
@@ -141,28 +158,43 @@ public class TwoPhoton_Import implements PlugIn {
 	
 	static public void setOptions() {
 		
-		GenericDialog gd=new GenericDialog("Options");
+		GenericDialog gd=new GenericDialog("2P-Import Options");
+		gd.addMessage("Continuous Import");
 		gd.addCheckbox("Set up Webpage?", false);
-		gd.addCheckbox("Move images when opened", dopos);
+		gd.addCheckbox("Set up Monitor IFTTT website?", false);
+		
+		gd.addMessage("Other");
+		gd.addCheckbox("Move images when opened", Prefs.get("AJ.TwoPhoton_Import.dopos", true));
+		gd.addCheckbox("Auto open all tps with slicelabels", Prefs.get("AJ.TwoPhoton_Import.noask", false));
+		gd.addCheckbox("Debug",false);
 		
 		gd.showDialog();
 		
 		if(gd.wasCanceled())return;
 		
 		if(gd.getNextBoolean()) {
-			if(askYesNoCancel("Set up Webpage","Change web root folder?\n"+webpath)) setUpWebpage();
+			if(IJ.showMessageWithCancel("Set up Webpage","Change web root folder?\n"+TwoPhotonImage.webpath)) TwoPhotonImage.setUpWebpage();
 		}
-		dopos=gd.getNextBoolean();
-		Prefs.set("AJ.TwoPhoton_Import.dopos", dopos);
+		if(gd.getNextBoolean()) {
+			GenericDialog sgd=new GenericDialog("IFTTT Webhook");
+			sgd.addStringField("When monitoring continuous 2p, the alarm can send\n a webhook to a website if you like:", Prefs.get("AJ.TwoPhoton_Import.alarmwebhook", ""));
+			sgd.showDialog();
+			if(!sgd.wasCanceled()) {
+				String wh=sgd.getNextString();
+				if(wh!=null && !wh.isEmpty()) {
+					if(!wh.startsWith("http"))wh="https://"+wh;
+				}
+				Prefs.set("AJ.TwoPhoton_Import.alarmwebhook",wh);
+			}
+		}
+		Prefs.set("AJ.TwoPhoton_Import.dopos", gd.getNextBoolean());
+		Prefs.set("AJ.TwoPhoton_Import.noask", gd.getNextBoolean());
+		debug=gd.getNextBoolean();
 		Prefs.savePreferences();
 	}
 	
 	public ImagePlus openTwoPhoton(String dir) {
-		return openTwoPhoton(dir,false,false);
-	}
-	
-	public ImagePlus openTwoPhoton(String dir, boolean noask) {
-		return openTwoPhoton(dir, noask, false);
+		return openTwoPhoton(dir, false, false);
 	}
 	
 	public ImagePlus openTwoPhoton(String dir, boolean noask, boolean recurse){
@@ -172,122 +204,31 @@ public class TwoPhoton_Import implements PlugIn {
 		if(dir.isEmpty())return null;
 		if(!isDirectory(dir))return null;
 		File f= new File(dir);
-		File[] fl=f.listFiles(nohidden);
+		long ptime=0;
+		if(debug) {IJ.log("Getting file list..."); ptime=System.currentTimeMillis();}
+		File[] fl=f.listFiles(TwoPhotonImage.nohidden);
+		if(debug) {IJ.log("File list took "+(System.currentTimeMillis()-ptime)+"ms");}
 
 		if(fl.length==0) {IJ.log("Directory is empty"); return null;}
 		
-		FolderType ftype=folderType(fl);
-		if(!ftype.hastifs && ftype.folders==0) {
+		getFolderType(fl);
+		if(!hasTifs && !hasFolders) {
 			IJ.log("\n"+dir+" has nothing to open");
 			return null;
 		}
-		if(!ftype.oif && !ftype.prairie){
+		if(!isOif && !isPrairie){
 			openAllFolder(dir,recurse);
 			return null;
 		}
 		
 		//sets up tpi and does exloc and updates from current file list
 		TwoPhotonImage tpi=new TwoPhotonImage(fl);
-		
-		int tpstart=1,tpend=tpi.frms;
-
-		boolean cont=tpi.cont,web=false;
-		String[] eventstr=new String[0];
-		
-		//Use open window if same name
-		ImagePlus img=WindowManager.getImage(tpi.RGBname);
-		if(img!=null) {
-			String imgdir= (String) img.getProperty("2p-Directory");
-			if(imgdir.equals(dir) && !noask && !askYesNoCancel("Use open","Use open window?"))img=null;
-			if(!imgdir.equals(dir))img=null;
-		}
-		if(img!=null){
-			tpi.updateFromImage(img);
-			cont=true;
-			WindowManager.setCurrentWindow(img.getWindow());
-		}else{
-			//Open dialog if image is not open already
-			if(((IJ.maxMemory()-IJ.currentMemory())<(tpi.tifsize*(tpend-tpstart+1)*tpi.getSlices(tpi.loc)*tpi.chs))) tpi.virtual=true;
-			if(!tpi.virtual && tpi.frms==1) noask=true;
-			if(!noask|| cont || tpi.locs>1){
-				String tpstr="1-"+tpi.frms;
-				GenericDialog gd=new GenericDialog(tpi.RGBname);
-				if(tpi.frms>1 && tpi.sls>1){
-					gd.addStringField("Timepoints", tpstr);
-				}
-				if(tpi.sls>1)gd.addCheckbox("Z-Project?", dozee);
-				gd.addCheckbox("Include slice times?", dotimes);
-				if(tpi.locs>1){gd.addNumericField("Location:", 1, 0, 3, "out of "+tpi.locs);}
-				gd.addCheckbox("Virtual?",tpi.virtual);
-				gd.addCheckbox("Half Gamma?", dogamma);
-				if(cont) gd.addCheckbox("Continue Update?",false);
-				long tolf=(System.currentTimeMillis()-tpi.lastfiletime)/1000;
-				if(tolf<10*60) gd.addMessage("Time since last file: "+ Math.round((double) tolf));
-				if(cont) gd.addCheckbox("Web",false);
-				if(cont) gd.addCheckbox("Set an event to mark",false);
-				gd.showDialog();
-				
-				if(gd.wasCanceled())return null;
-				
-				if(tpi.frms>1 && tpi.sls>1) {
-					tpstr=gd.getNextString();
-					int hyph=tpstr.indexOf("-");
-					if(hyph==-1){tpend=AJ_Utils.parseIntTP(tpstr); tpstart=tpend; dozee=false;}
-					else {tpstart=AJ_Utils.parseIntTP(tpstr.substring(0,hyph));
-						tpend=AJ_Utils.parseIntTP(tpstr.substring(hyph+1,tpstr.length()));}
-					if(tpstart<0)tpstart=1; if(tpend<0) tpend=tpi.frms;
-				}
-				if(tpi.sls>1)dozee=gd.getNextBoolean();else dozee=false;
-				dotimes=tpi.dotimes=gd.getNextBoolean();
-				Prefs.set("AJ.TwoPhoton_Import.dotimes", tpi.dotimes);
-				if(tpi.locs>1) tpi.setLocation((int) gd.getNextNumber()-1);
-				tpi.virtual=gd.getNextBoolean();
-				dogamma=tpi.dogamma=gd.getNextBoolean();
-				Prefs.set("AJ.TwoPhoton_Import.dogamma", tpi.dogamma);
-				Prefs.savePreferences();
-				if(cont) {
-					cont=gd.getNextBoolean();
-					web=gd.getNextBoolean();
-					if(web && !(new File(webpath+"index.htm").exists())) web=setUpWebpage();
-					if(web && gd.getNextBoolean()){ 
-						gd=new GenericDialog("Set event");
-						LocalTime lt=LocalTime.now();
-						gd.addStringField("Time or time point of event",""+lt.getHour()+":"+lt.getMinute()+":"+lt.getSecond());
-						gd.addStringField("Event name:","");
-						gd.showDialog();
-						if(!gd.wasCanceled()){
-							eventstr=new String[2];
-							eventstr[0]=gd.getNextString();
-							eventstr[1]=gd.getNextString();
-						}
-					}
-				}
-				if(cont) {tpend=tpi.frms;}
-			}else{
-				//tpi.dotimes=false;
-			}
-			
-			if(!tpi.virtual && ((IJ.maxMemory()-IJ.currentMemory())<(tpi.tifsize*(tpend-tpstart+1)*tpi.getSlices(tpi.loc)*tpi.chs)))
-				if(askYesNoCancel("Virtual","Maybe not enough memory, open as virtual?"))tpi.virtual=true;
-
-			if(tpi.virtual) {
-				tpi.scale=(int) IJ.getNumber("Change this from 100 to scale instead of Virtual stack",100);
-				if(tpi.scale==100){dozee=false; tpi.dogamma=false;}
-			}
-			
-			//load the image
-			if(IJ.getLog()!=null)IJ.log("");
-			IJ.log(f.getParentFile().getName()+File.separator+tpi.RGBname+":");
-			IJ.log(tpi.exlocoutput);
-			img=tpi.loadFirstImage(tpstart,tpend,dopos);
-			if(dozee) {tpi.zProject(dopos);}
-		}
-		if(cont) startContinuousUpdate(tpi,web,eventstr);
-		
-		return img;
+		if(noask)tpi.noask=true;
+		return tpi.open();
+	
 	}
 
-	public void updateImageSliceTimes() {
+	public static void updateImageSliceTimes() {
 		 TwoPhotonImage.updateImageSliceTimes(WindowManager.getCurrentImage());
 	}
 	
@@ -302,128 +243,10 @@ public class TwoPhoton_Import implements PlugIn {
 	public void startContinuousUpdate() {
 		ImagePlus img=WindowManager.getCurrentImage();
 		if(img!=null){
-			String[] eventstr=new String[0];
-			boolean web=false;
 			TwoPhotonImage tpi=new TwoPhotonImage(img);
-			tpi.exLoc();
-			GenericDialog gd=new GenericDialog("Continuous Update");
-			gd.addMessage("Continuous update on "+tpi.img.getTitle()+"?");
-			gd.addCheckbox("Web",false);
-			gd.addCheckbox("Set an event to mark",false);
-			gd.showDialog();
-			if(gd.wasCanceled())return;
-			web=gd.getNextBoolean();
-			if(gd.getNextBoolean()){ 
-				gd=new GenericDialog("Set event");
-				LocalTime lt=LocalTime.now();
-				gd.addStringField("Time or time point of event",""+lt.getHour()+":"+lt.getMinute()+":"+lt.getSecond());
-				gd.addStringField("Event name:","CGRP");
-				gd.showDialog();
-				if(!gd.wasCanceled()) {
-					eventstr=new String[2];
-					eventstr[0]=gd.getNextString();
-					eventstr[1]=gd.getNextString();
-				}
-			}
-			if(web && !(new File(webpath+"index.htm").exists())) web=setUpWebpage();
-			startContinuousUpdate(tpi,web,eventstr);
+			tpi.setupContinuousUpdate();
+			tpi.startContinuousUpdate();
 		}else {IJ.noImage(); return;}
-	}
-	
-	private void startContinuousUpdate(TwoPhotonImage tpi, boolean web, String[] eventstr){
-		IJ.log("Start cont");
-		String title="Time Series Clock";
-		TextWindow tsc=(TextWindow) WindowManager.getWindow(title);
-		if(tsc==null) {
-			tsc=new TextWindow(title,"Currently "+tpi.sl+" slices of tp "+tpi.totfrms,500,190);
-			tsc.setLocation(10,10);
-		}
-		TextPanel tscp=tsc.getTextPanel();
-		boolean cont=true;
-		while(cont) {
-			if(tpi.img==null || !tpi.img.isVisible() || tsc==null || !tsc.isVisible())break;
-			
-			String[] tpstr=new String[3];
-			tpi.updateFLInfo(true);
-			tpstr[0]="Currently "+tpi.sl+"/"+tpi.sls+" slices of tp "+tpi.totfrms;
-			long eltime=(System.currentTimeMillis()-tpi.firstfiletime);
-			long deadtime=(System.currentTimeMillis()-tpi.lastfiletime);
-			tpstr[1]="Running for "+AJ_Utils.textTime(eltime,"h:m:s");
-			if((tpi.totaltps)>(tpi.frms)) {
-				tpstr[0]=tpstr[0]+"/"+tpi.totaltps;
-				tpstr[1]=tpstr[1]+" / "+AJ_Utils.textTime((long)((double)tpi.totaltps*tpi.cal.frameInterval*1000.0),"h:m:s");
-			}
-			tpstr[2]="Idle for "+AJ_Utils.textTime(deadtime,"h:m:s");
-			tscp.clear();
-			for(int i=0;i<tpstr.length;i++)
-				tsc.append(tpstr[i]);
-			boolean updated=false;
-			if(tpi.frms>tpi.frend) {
-				ImageCanvas ic=tpi.img.getCanvas();
-				ImageCanvas zic=null;
-				if(tpi.zimg!=null) zic=tpi.zimg.getCanvas();
-				while(tpi.mousePressed || ic.getModifiers()!=0 || (zic==null?(false):(zic.getModifiers()!=0))) {
-					tscp.setLine(tscp.getLineCount()-1,"Waiting for mouse release to update image...");
-					IJ.wait(50);
-				}
-				IJ.wait(50);
-				tpi.updateImage();
-				updated=true;
-			}
-			
-			if(web){
-				try {
-					PrintStream ps=new PrintStream(webpath+"2p-update.txt");
-					ps.println(tpstr[0]);
-					ps.println(tpstr[1]);
-					ps.println(tpstr[2]);
-					ps.close();
-				}catch(Exception e) {
-					 IJ.error("Could not write to web text file\n"+e.getMessage());
-				}
-				
-				if(updated) {
-					ImagePlus latestmax=tpi.getLatestMax();
-					latestmax.setDimensions(tpi.img.getNChannels(), 1, 1);
-					latestmax.setDisplayMode(tpi.img.getDisplayMode());
-					latestmax.show();
-					IJ.run("Size...", "width=230 height=230 constrain interpolation=Bilinear");
-					IJ.wait(500);
-					IJ.saveAs(latestmax,"Jpeg", webpath+"2p-update.jpg");
-					latestmax.changes=false;
-					latestmax.close();
-					if( (tpi.frms>9) && tpi.frms%10==0 ){
-						boolean haszimg=(tpi.zimg!=null);
-						ImagePlus giffer=null;
-						if(haszimg)giffer=tpi.zimg.duplicate();
-						else giffer=tpi.zProject(false);
-						giffer.setTitle("giffer");
-						giffer.show();
-						//WindowManager.setCurrentWindow(giffer.getWindow());
-						//run("AVI... ", "compression=JPEG jpeg=10 frame=5 save="+webpath+"goingon.avi");
-						IJ.run("Size...", "width=230 height=230 constrain interpolate"); IJ.wait(200);
-						giffer=WindowManager.getImage("giffer");
-						if(eventstr.length==2){
-							IJ.run("Print Times", "set="+eventstr[0]+" levels=1 prefix=["+eventstr[1]+"] background label do");
-						}else {
-							IJ.run("Print Times", "levels=1 background label do");
-						}
-						IJ.run("Stack to RGB", "frames");IJ.wait(200);
-						ImagePlus rgbgiffer=WindowManager.getImage("giffer");
-						WindowManager.setCurrentWindow(rgbgiffer.getWindow());
-						IJ.run("Animated Gif ... ", "name=giffer set_global_lookup_table_options=[Load from Current Image] optional=[] image=[No Disposal] set=100 number=0 transparency=[No Transparency] red=0 green=0 blue=0 index=0 filename="+webpath+"2p-update.gif");
-						if(giffer!=null) {giffer.changes=false; giffer.close();}
-						if(rgbgiffer!=null) {rgbgiffer.changes=false; rgbgiffer.close();}
-						if(!haszimg) {
-							tpi.zimg.close();
-							tpi.zimg=null;
-						}
-					}
-				}
-			}
-			IJ.wait(1000);
-		}
-		IJ.log("End Continuous Update");
 	}
 
 	public void openAllFolder(String path, boolean recurse){
@@ -433,7 +256,7 @@ public class TwoPhoton_Import implements PlugIn {
 			f= new File(path);
 		}catch(Exception e) {IJ.error("Could not open directory to open all files");return;}
 		if(f==null || !f.exists() || !f.isDirectory()) return;
-		File[] fl=f.listFiles(nohidden);
+		File[] fl=f.listFiles(TwoPhotonImage.nohidden);
 
 		if(fl.length==0) {IJ.log("Directory is empty"); return;}
 		
@@ -456,9 +279,9 @@ public class TwoPhoton_Import implements PlugIn {
 		
 		String filterstring="";
 		if(folders.size()>0) dofs=true;
-		if(tifs.size()>0)dotifs=true;
+		if(tifs.size()>0) dotifs=true;
 		if(folders.size()==1 && tifs.size()==0) {
-			openTwoPhoton(path+File.separator+fl[folders.get(0)]); return;
+			openTwoPhoton(fl[folders.get(0)].getAbsolutePath(),true,recurse); return;
 		}else {
 			if(!recurse){
 				GenericDialog gd = new GenericDialog("Open all");
@@ -486,7 +309,7 @@ public class TwoPhoton_Import implements PlugIn {
 			for(int i=0;i<fl.length;i++) {
 				go=true; name=fl[i].getName();
 				if(name.endsWith(".tif")|| fl[i].isDirectory()){
-					if(filterstring!=""){
+					if(!filterstring.contentEquals("")){
 						go=false; 
 						if(filterstring.startsWith("*")) {
 							int mod=0; 
@@ -506,8 +329,8 @@ public class TwoPhoton_Import implements PlugIn {
 					}
 					if((go && dofs) && fl[i].isDirectory() && !name.startsWith("SingleImage-") && !name.startsWith("Projection")) {
 						//don't open mosaic in folder unless specified
-						if(name.startsWith("FV10_")){if(askYesNoCancel("FV10","Open "+fl[i]+"?")) openTwoPhoton(fl[i].getAbsolutePath(),true);}
-						else {openTwoPhoton(fl[i].getAbsolutePath(),true,recurse);}
+						if(name.startsWith("FV10_")){if(IJ.showMessageWithCancel("FV10","Open "+fl[i]+"?")) openTwoPhoton(fl[i].getAbsolutePath(),true, true);}
+						else {openTwoPhoton(fl[i].getAbsolutePath(),true, recurse);}
 					}
 					if(go && dotifs && name.endsWith(".tif"))
 						IJ.openImage(fl[i].getAbsolutePath());
@@ -537,17 +360,17 @@ public class TwoPhoton_Import implements PlugIn {
 		if(dir==null)return null;
 		File f= new File(dir);
 		if(!f.exists() || !f.isDirectory()) return null;
-		File[] fl=f.listFiles(nohidden);
+		File[] fl=f.listFiles(TwoPhotonImage.nohidden);
 
 		if(fl.length==0) {IJ.log("Directory is empty"); return null;}
 		
-		FolderType ftype=folderType(fl);
-		if(!ftype.hastifs && ftype.folders==0) {
+		getFolderType(fl);
+		if(!hasTifs && !hasFolders) {
 			IJ.log("\n"+dir+" has nothing to open");
 			return null;
 		}
-		if(!ftype.oif && !ftype.prairie){
-			if(recurse && ftype.folders>0) {
+		if(!isOif && !isPrairie){
+			if(recurse && hasFolders) {
 				for(int i=0;i<fl.length;i++) {
 					if(fl[i].isDirectory())printExLoc(fl[i].getAbsolutePath(),true);
 				}
@@ -557,83 +380,16 @@ public class TwoPhoton_Import implements PlugIn {
 			}
 		}
 		
-		TwoPhotonImage tpi=new TwoPhotonImage(fl,false);
+		TwoPhotonImage tpi=new TwoPhotonImage(fl);
 		if(IJ.getLog()!=null)IJ.log("");
 		IJ.log(tpi.exlocoutput);
 		return tpi;
 		
 	}
 	
-	static private boolean setUpWebpage(){
-		IJ.showMessage("2p-Import can update files for a simple webpage.\nTo start, choose the directory of your webserver.");
-		webpath=IJ.getDirectory("");
-		if(webpath==null || webpath.equals("")) return false;
-		if(webpath.endsWith("\\")||webpath.endsWith("/"))webpath=webpath.substring(0,webpath.length()-1);
-		webpath+=File.separator;
-		if(!(new File(webpath+"2p-update.txt").exists())) {
-			try {
-				PrintStream ps=new PrintStream(webpath+"2p-update.txt");
-				ps.println("2p live data goes here");
-				ps.close();
-			}catch(Exception e) {
-				 IJ.error("Could not write to web text file "+e.getMessage());
-				 return false;
-			}
-		}else IJ.log("Using existing 2p-update.txt");
-		if(!(new File(webpath+"index.htm").exists())) {
-			try {
-				PrintStream ps=new PrintStream(webpath+"index.htm");
-				BufferedReader reader = new BufferedReader(new InputStreamReader(TwoPhoton_Import.class.getClassLoader().getResource("webroot/index.htm").openStream()));
-				String contents="";
-				String adder=reader.readLine();
-				while(adder!=null) {
-					contents+=adder+"\n";
-					adder=reader.readLine();
-				}
-				ps.print(contents);
-				ps.close();
-			}catch(Exception e) {
-				 IJ.error("Could not write to web index.html file "+e.getMessage());
-				 return false;
-			}
-		}else IJ.log("Using existing index.htm");
-		if(!(new File(webpath+"movie.htm").exists())) {
-			try {
-				PrintStream ps=new PrintStream(webpath+"movie.htm");
-				BufferedReader reader = new BufferedReader(new InputStreamReader(TwoPhoton_Import.class.getClassLoader().getResource("webroot/movie.htm").openStream()));
-				String contents="";
-				String adder=reader.readLine();
-				while(adder!=null) {
-					contents+=adder+"\n";
-					adder=reader.readLine();
-				}
-				ps.print(contents);
-				ps.close();
-			}catch(Exception e) {
-				 IJ.error("Could not write to web index.html file "+e.getMessage());
-				 return false;
-			}
-		}else IJ.log("Using existing movie.htm");
-		Prefs.set("AJ.TwoPhoton_Import.webpath",webpath);
-		Prefs.savePreferences();
-		return true;
-	}	
-	
 	//
 	// Utility Functions
 	//
-	
-
-	
-	static private boolean askYesNoCancel(String title, String text){
-		GenericDialog gb=new GenericDialog(title);
-		gb.enableYesNoCancel();
-		gb.hideCancelButton();
-		gb.addMessage(text);
-		gb.showDialog();
-		if(gb.wasOKed()) return true;
-		else return false;
-	}
 	
 	public static void addTPPopup() {
 		if(hasInstalledTPPopup())return;

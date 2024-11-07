@@ -2,12 +2,7 @@ package ajs.tools;
 import ij.plugin.PlugIn;
 import ij.gui.*;
 import ij.*;
-//import ij.io.LogStream;
-//import net.imagej.*;
-//import java.awt.*;
 import java.lang.Math;
-//import java.awt.event.*;
-//import java.util.*;
 
 
 /**
@@ -27,7 +22,7 @@ public class Slicelabel_Transfer implements PlugIn {
 	 
 	@Override
 	public void run(String arg) {
-	//args= "images=title additoinal=adder prepend(if true) begin=offset" 
+	//args= "images=title additional=adder prepend(if true) begin=offset" 
 	//where title is the transfer-to image and adder is an optional added line to the transferred text, 
 	//prepend is whether to prepend or postpend the adder, and offset is beginning fr on target
 		IJ.showStatus("Slicelabel_transfer");
@@ -109,6 +104,7 @@ public class Slicelabel_Transfer implements PlugIn {
 			return;
 		}
 		String temp;
+		ImageStack st=timp.getStack();
 		if(timp.getStackSize()==1) {
 			timp.setProperty("Label", preadder+simp.getProperty("Label")+postadder);
 		}else{
@@ -126,7 +122,7 @@ public class Slicelabel_Transfer implements PlugIn {
 							if(ioc>-1 && cht==1 && chs>1 && temp.startsWith("s_") && temp.length()>ioc+4){
 								temp=""+temp.substring(0,ioc+1)+"RGB"+temp.substring(ioc+4);
 							}
-							timp.getStack().setSliceLabel(preadder+temp+postadder,(fr+offset)*(slt*cht)+sl*cht+ch+1);
+							st.setSliceLabel(preadder+temp+postadder,(fr+offset)*(slt*cht)+sl*cht+ch+1);
 						}
 					}
 				}

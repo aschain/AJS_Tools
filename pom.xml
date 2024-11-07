@@ -8,7 +8,7 @@
 	<parent>
 		<groupId>org.scijava</groupId>
 		<artifactId>pom-scijava</artifactId>
-		<version>14.0.0</version>
+		<version>34.1.0</version>
 		<relativePath />
 	</parent>
 
@@ -111,11 +111,27 @@
 		<license.licenseName>bsd_2</license.licenseName>
 		<license.copyrightOwners>Aaron Schain</license.copyrightOwners>
 	</properties>
+	
+	<repositories>
+	    <repository>
+	      <id>ImageJ-releases</id>
+	      <name>ImageJ Releases</name>
+	      <url>https://maven.imagej.net/content/repositories/releases/</url>
+	    </repository>
+	</repositories>
 
 	<dependencies>
 		<dependency>
 			<groupId>net.imagej</groupId>
 			<artifactId>ij</artifactId>
+		</dependency>
+		<dependency>
+    		<groupId>sc.fiji</groupId>
+    		<artifactId>Skeletonize3D_</artifactId>
+		</dependency>
+		<dependency>
+    		<groupId>sc.fiji</groupId>
+    		<artifactId>AnalyzeSkeleton_</artifactId>
 		</dependency>
 	</dependencies>
 	
@@ -133,6 +149,7 @@
 			<plugin>
 				<groupId>org.codehaus.mojo</groupId>
 				<artifactId>exec-maven-plugin</artifactId>
+				<configuration><skip>${maven.exec.skip}</skip></configuration>
 				<executions>
 				  <execution>
 				  	<id>first-execution</id>
@@ -145,7 +162,7 @@
 				      <workingDirectory>${basedir}</workingDirectory>
 				      <arguments>
 				    	  <argument>-c</argument>
-				    	  <argument>"../copyToFiji.sh plugins ${project.artifactId} target/${project.build.finalName}.jar"</argument>
+				    	  <argument>../copyToFiji.sh plugins ${project.artifactId} target/${project.build.finalName}.jar</argument>
 				      </arguments>
 				    </configuration>
 				  </execution>

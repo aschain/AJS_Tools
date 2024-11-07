@@ -6,14 +6,19 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 import ij.IJ;
+import ij.ImagePlus;
 import ij.gui.GenericDialog;
 import ij.plugin.PlugIn;
+import ij.process.LUT;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FilenameFilter;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public class AJ_Utils implements PlugIn{
@@ -37,7 +42,7 @@ public class AJ_Utils implements PlugIn{
 			    if (!entry.isDirectory() && entry.getName().endsWith(".class")) {
 			        // This ZipEntry represents a class. Now, what class does it represent?
 			        String className = entry.getName().replace('/', '.'); // including ".class"
-			        if(!className.contains("$") && !className.contains("AJ_Utils"))classNames.add(className.substring(0, className.length() - ".class".length()));
+			        if(!className.contains("$") && !className.contains("AJ_Utils")&& !className.contains("AJ_Misc_Plugins")) classNames.add(className.substring(0, className.length() - ".class".length()));
 			    }
 			}
 
@@ -51,7 +56,7 @@ public class AJ_Utils implements PlugIn{
 			try {
 				temp = Class.forName(cls);
 			}catch(Exception e) {
-				e.printStackTrace();
+				IJ.log(e.getLocalizedMessage());
 			}
 			try {
 				method=temp.getMethod("run", new Class[] {String.class});
@@ -60,6 +65,14 @@ public class AJ_Utils implements PlugIn{
 			}
 			if(method!=null) pluginNames.add(cls.replace("ajs.tools.", ""));
 		}
+		Method[] allMethods = AJ_Misc_Plugins.class.getDeclaredMethods();
+		for (Method method : allMethods) {
+		    if (Modifier.isPublic(method.getModifiers()) && Modifier.isStatic(method.getModifiers())) {
+		        if(method.getAnnotatedParameterTypes().length==0) {
+		        	pluginNames.add("AJMP-"+method.getName());
+		        }
+		    }
+		}
 		if(pluginNames.size()>0) {
 			GenericDialog gd = new GenericDialog("Run AJS_Tools Plugin");
 			gd.addMessage("Run one of the following with argument:");
@@ -67,12 +80,19 @@ public class AJ_Utils implements PlugIn{
 			gd.addChoice("Plugin:", (String[]) pluginNames.toArray(new String[pluginNames.size()]), pluginNames.get(0));
 			gd.showDialog();
 			if(gd.wasCanceled())return;
-			IJ.runPlugIn("ajs.tools."+gd.getNextChoice(), gd.getNextString());
+			String choice=gd.getNextChoice();
+			if(choice.startsWith("AJMP-")) {
+				IJ.runPlugIn("ajs.tools.AJ_Misc_Plugins",choice.substring(5));
+			}else{
+				IJ.runPlugIn("ajs.tools."+choice, gd.getNextString());
+			}
 		}
 	}
 	
 	public static int parseIntTP(String test){
-		return (int)parseDoubleTP(test);
+		double result=parseDoubleTP(test);
+		if(result==Double.NEGATIVE_INFINITY)return Integer.MIN_VALUE;
+		return (int)result;
 	}
 	
 	public static double parseDoubleTP(String test){
@@ -80,7 +100,7 @@ public class AJ_Utils implements PlugIn{
 	}
 
 	public static double parseDoubleTP(String test, int digits){
-		double result=-1.0;
+		double result=Double.NEGATIVE_INFINITY;
 		try{
 			result = Double.parseDouble(test);
 			result=(double)Math.round(result*Math.pow(10d, digits))/Math.pow(10d, digits);
@@ -96,6 +116,11 @@ public class AJ_Utils implements PlugIn{
 	 */
 	public static long sysTime(String datetime) {
 		long res=0;
+		if(datetime.contains("/")) {
+			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("M/d/yyyy h:m:s a");
+			LocalDateTime dt=LocalDateTime.parse(datetime,formatter);
+			return (dt.toEpochSecond(ZoneOffset.UTC)*1000);
+		}
 		GregorianCalendar cal=new GregorianCalendar();
 		cal.setTimeInMillis(0);
 		String[] dta=datetime.split(" ");
@@ -217,7 +242,7 @@ public class AJ_Utils implements PlugIn{
 			int end=numstr.length(),st=end;
 			boolean start=true;
 			for(int i=0;i<numstr.length();i++) {
-				boolean isn=-1==AJ_Utils.parseIntTP(numstr.substring(i, i+1));
+				boolean isn=Integer.MIN_VALUE==AJ_Utils.parseIntTP(numstr.substring(i, i+1));
 				if(start&& !isn) {st=i;start=false;}
 				if(!start && isn) {end=i;break;}
 			}
@@ -262,7 +287,8 @@ public class AJ_Utils implements PlugIn{
 	
 	public static boolean doesClassExist(String classname) {
 		try {
-			Class.forName(classname);
+			//Class.forName(classname);
+			IJ.getClassLoader().loadClass(classname);
 		}catch(Exception e) {
 			return false;
 		}
@@ -273,6 +299,36 @@ public class AJ_Utils implements PlugIn{
 		if(bits==16)return 65535.0;
 		if(bits==32)return Integer.MAX_VALUE;
 		return 255.0;
+	}
+	
+	public static String[] getTextLUTs(ImagePlus imp){
+		int chs=imp.getNChannels();
+		String[] tluts=new String[chs];
+		if(imp.getBitDepth()==24) {IJ.error("RGB image"); return null;}
+		LUT[] luts=imp.getLuts();
+		for(int i=0;i<chs;i++){
+			int redv=luts[i].getRed(128);
+			int greenv=luts[i].getGreen(128);
+			int bluev=luts[i].getBlue(128);
+			int max=Math.max(redv, Math.max(greenv, bluev));
+			boolean red=(max==redv); boolean green=(max==greenv); boolean blue=(max==bluev);
+			String result="";
+			if(red) {
+				result="red";
+				if(green) result="yellow";
+				if(blue) {
+					result="magenta";
+					if(green) result="black"; //!! Change
+				}
+			}
+			else if(green) {
+				result="green";
+				if(blue) result="cyan";
+			}
+			else if(blue) result="blue";
+			tluts[i]=result;
+		}
+		return tluts;
 	}
 	
 }
