@@ -26,17 +26,7 @@ The build uses ImageJ/Fiji dependencies and a few additional packages such as CL
 
 ## Build
 
-From the project root, run:
-
-```bash
-mvn package
-```
-
-This produces a plugin jar in the target directory.
-
-## Install
-
-After building, copy the generated jar from the target folder into your Fiji/ImageJ plugins directory, or if you have your imagej directory defined in maven, run:
+From the project root, build with maven:
 
 ```bash
 mvn install
