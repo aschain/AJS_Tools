@@ -131,29 +131,5 @@
 				<directory>${basedir}/src/main/java/</directory>
 			</resource>
 		</resources>
-		<plugins>
-			<plugin>
-				<groupId>org.codehaus.mojo</groupId>
-				<artifactId>exec-maven-plugin</artifactId>
-				<configuration><skip>${maven.exec.skip}</skip></configuration>
-				<executions>
-				  <execution>
-				  	<id>first-execution</id>
-				    <phase>install</phase>
-				    <goals>
-				       <goal>exec</goal>
-				    </goals>
-				    <configuration>
-				      <executable>bash</executable>
-				      <workingDirectory>${basedir}</workingDirectory>
-				      <arguments>
-				    	  <argument>-c</argument>
-				    	  <argument>../copyToFiji.sh plugins ${project.artifactId} target/${project.build.finalName}.jar</argument>
-				      </arguments>
-				    </configuration>
-				  </execution>
-				</executions>
-			</plugin>
-		</plugins>
 	</build>
 </project>
