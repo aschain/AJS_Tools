@@ -8,7 +8,7 @@
 	<parent>
 		<groupId>org.scijava</groupId>
 		<artifactId>pom-scijava</artifactId>
-		<version>14.0.0</version>
+		<version>43.0.0</version>
 		<relativePath />
 	</parent>
 
@@ -48,39 +48,10 @@
 	</developers>
 	<contributors>
 		<contributor>
-			<name>Curtis Rueden</name>
-			<url>http://imagej.net/User:Rueden</url>
+			<name>Aaron Schain</name>
+			<url>http://imagej.net/User:ASchain</url>
 			<roles><role>founder</role></roles>
-			<properties><id>ctrueden</id></properties>
-		</contributor>
-		<contributor>
-			<name>Johannes Schindelin</name>
-			<url>http://imagej.net/User:Schindelin</url>
-			<roles><role>founder</role></roles>
-			<properties><id>dscho</id></properties>
-		</contributor>
-		<contributor>
-			<name>Olivier Burri</name>
-			<url>http://imagej.net/User:Oburri</url>
-			<properties><id>lacan</id></properties>
-		</contributor>
-		<contributor>
-			<name>Mark Hiner</name>
-			<url>http://imagej.net/User:Hinerm</url>
-			<properties><id>hinerm</id></properties>
-		</contributor>
-		<contributor>
-			<name>Jules Maselbas</name>
-		</contributor>
-		<contributor>
-			<name>Kota Miura</name>
-			<url>http://imagej.net/User:Miura</url>
-			<properties><id>cmci</id></properties>
-		</contributor>
-		<contributor>
-			<name>Yili Zhao</name>
-			<url>http://imagej.net/User:Panovr</url>
-			<properties><id>panovr</id></properties>
+			<properties><id>aschain</id></properties>
 		</contributor>
 	</contributors>
 
@@ -111,11 +82,42 @@
 		<license.licenseName>bsd_2</license.licenseName>
 		<license.copyrightOwners>Aaron Schain</license.copyrightOwners>
 	</properties>
+	
+	<repositories>
+	    <repository>
+	      <id>ImageJ-releases</id>
+	      <name>ImageJ Releases</name>
+	      <url>https://maven.scijava.org/content/repositories/releases/</url>
+	    </repository>
+		<repository>
+			<id>ImageJ-public</id>
+			<name>ImageJ Public</name>
+			<url>https://maven.scijava.org/content/repositories/public/</url>
+		</repository>
+	</repositories>
 
 	<dependencies>
 		<dependency>
 			<groupId>net.imagej</groupId>
 			<artifactId>ij</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.ejml</groupId>
+			<artifactId>ejml-all</artifactId>
+			<version>0.41</version>
+		</dependency>
+		<dependency>
+			<groupId>net.haesleinhuepf</groupId>
+			<artifactId>clij2_</artifactId>
+			<version>2.5.1.4</version>
+		</dependency>
+		<dependency>
+    		<groupId>sc.fiji</groupId>
+    		<artifactId>Skeletonize3D_</artifactId>
+		</dependency>
+		<dependency>
+    		<groupId>sc.fiji</groupId>
+    		<artifactId>AnalyzeSkeleton_</artifactId>
 		</dependency>
 	</dependencies>
 	
@@ -125,45 +127,33 @@
 				<directory>${basedir}/src/main/resources/</directory>
 			</resource>
 			<resource>
-				<targetPath>src/main/java/AJ</targetPath>
+				<targetPath>src/main/java/</targetPath>
 				<directory>${basedir}/src/main/java/</directory>
 			</resource>
 		</resources>
-		<!-- -->
 		<plugins>
-			 <plugin>
-			    <groupId>org.codehaus.mojo</groupId>
-			    <artifactId>exec-maven-plugin</artifactId>
-			    <executions>
-			      <execution>
-			      	<id>first-execution</id>
-			        <phase>install</phase>
-			        <goals>
-			           <goal>exec</goal>
-			        </goals>
-			        <configuration>
-			          <executable>copy-over.bat</executable>
-			          <workingDirectory>${basedir}/target/</workingDirectory>
-			        </configuration>
-			      </execution>
-			      <!-- 
-			      <execution>
-			      	<id>second-execution</id>
-			        <phase>install</phase>
-			        <goals>
-			           <goal>exec</goal>
-			        </goals>
-			        <configuration>
-			          <executable>cmd</executable>
-			          <arguments>\C</arguments>
-			          <arguments>\"start</arguments>
-			          <arguments>C:\Users\aschain\Documents\Fiji.app\ImageJ-win64.exe\"</arguments>
-			        </configuration>
-			      </execution>
-			       -->
-			    </executions>
-			  </plugin>
+			<plugin>
+				<groupId>org.codehaus.mojo</groupId>
+				<artifactId>exec-maven-plugin</artifactId>
+				<configuration><skip>${maven.exec.skip}</skip></configuration>
+				<executions>
+				  <execution>
+				  	<id>first-execution</id>
+				    <phase>install</phase>
+				    <goals>
+				       <goal>exec</goal>
+				    </goals>
+				    <configuration>
+				      <executable>bash</executable>
+				      <workingDirectory>${basedir}</workingDirectory>
+				      <arguments>
+				    	  <argument>-c</argument>
+				    	  <argument>../copyToFiji.sh plugins ${project.artifactId} target/${project.build.finalName}.jar</argument>
+				      </arguments>
+				    </configuration>
+				  </execution>
+				</executions>
+			</plugin>
 		</plugins>
-		<!-- -->
 	</build>
 </project>
