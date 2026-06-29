@@ -80,20 +80,6 @@ mvn install
 - Z Step Max — performs a max intensity z-kernel filter.
 - Concat Chs — concatenates images by their channels. Images must have matching slices and frames (found in Image > Stacks > Tools menu instead of Plugins > AJS).
 
-## Source layout
-
-The main implementation classes are in [src/main/java/ajs/tools](src/main/java/ajs/tools). Key files include:
-
-- [src/main/java/ajs/tools/TwoPhoton_Import.java](src/main/java/ajs/tools/TwoPhoton_Import.java)
-- [src/main/java/ajs/tools/Slicelabel_Transfer.java](src/main/java/ajs/tools/Slicelabel_Transfer.java)
-- [src/main/java/ajs/tools/Slicelabel_Editor.java](src/main/java/ajs/tools/Slicelabel_Editor.java)
-- [src/main/java/ajs/tools/Time_Extractor.java](src/main/java/ajs/tools/Time_Extractor.java)
-- [src/main/java/ajs/tools/Diameter_Profile.java](src/main/java/ajs/tools/Diameter_Profile.java)
-- [src/main/java/ajs/tools/Thresh_Cell_Transfer.java](src/main/java/ajs/tools/Thresh_Cell_Transfer.java)
-- [src/main/java/ajs/tools/GCaMP_Data.java](src/main/java/ajs/tools/GCaMP_Data.java)
-- [src/main/java/ajs/tools/Skull_Leveler.java](src/main/java/ajs/tools/Skull_Leveler.java)
-- [src/main/java/ajs/tools/AJ_Misc_Plugins.java](src/main/java/ajs/tools/AJ_Misc_Plugins.java)
-
 ## Notes
 
 This project is an ImageJ 1.x plugin bundle and may require a Fiji-compatible environment for the most reliable experience.
