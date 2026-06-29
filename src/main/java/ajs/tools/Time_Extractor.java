@@ -195,7 +195,7 @@ public class Time_Extractor implements PlugIn {
 		int chs=imp.getNChannels(),sls=imp.getNSlices(),frms=imp.getNFrames();
 		String hasAJZstr=imp.getStringProperty("2p-hasAJZ");
 		boolean hasAJZ=false;
-		if(hasAJZstr!=null &&hasAJZstr.equals("true"))hasAJZ=true;
+		if(hasAJZstr!=null && hasAJZstr.equals("true")) hasAJZ=true;
 		long frint=(long)(imp.getCalibration().frameInterval*1000);
 		if(frint==0)frint=1;
 		String[] labels=imp.getImageStack().getSliceLabels();
@@ -248,7 +248,7 @@ public class Time_Extractor implements PlugIn {
 
 		if(subtime!=SubTime.NONE) {
 			double eventTime=result[0];
-			if(subtime==SubTime.EVENT_SET || subtime==SubTime.EVENT_NO_SET) {
+			if(subtime==SubTime.EVENT_SET || subtime==SubTime.EVENT_NO_SET && frms>1) {
 				int eventFrame=getEventFrameFromInfo(imp, subtime==SubTime.EVENT_SET);
 				if(eventFrame>0 && eventFrame<=imp.getNFrames()) {
 					eventTime=result[(eventFrame-1)*endsls];

@@ -8,7 +8,7 @@
 	<parent>
 		<groupId>org.scijava</groupId>
 		<artifactId>pom-scijava</artifactId>
-		<version>34.1.0</version>
+		<version>43.0.0</version>
 		<relativePath />
 	</parent>
 
@@ -48,39 +48,10 @@
 	</developers>
 	<contributors>
 		<contributor>
-			<name>Curtis Rueden</name>
-			<url>http://imagej.net/User:Rueden</url>
+			<name>Aaron Schain</name>
+			<url>http://imagej.net/User:ASchain</url>
 			<roles><role>founder</role></roles>
-			<properties><id>ctrueden</id></properties>
-		</contributor>
-		<contributor>
-			<name>Johannes Schindelin</name>
-			<url>http://imagej.net/User:Schindelin</url>
-			<roles><role>founder</role></roles>
-			<properties><id>dscho</id></properties>
-		</contributor>
-		<contributor>
-			<name>Olivier Burri</name>
-			<url>http://imagej.net/User:Oburri</url>
-			<properties><id>lacan</id></properties>
-		</contributor>
-		<contributor>
-			<name>Mark Hiner</name>
-			<url>http://imagej.net/User:Hinerm</url>
-			<properties><id>hinerm</id></properties>
-		</contributor>
-		<contributor>
-			<name>Jules Maselbas</name>
-		</contributor>
-		<contributor>
-			<name>Kota Miura</name>
-			<url>http://imagej.net/User:Miura</url>
-			<properties><id>cmci</id></properties>
-		</contributor>
-		<contributor>
-			<name>Yili Zhao</name>
-			<url>http://imagej.net/User:Panovr</url>
-			<properties><id>panovr</id></properties>
+			<properties><id>aschain</id></properties>
 		</contributor>
 	</contributors>
 
@@ -116,14 +87,29 @@
 	    <repository>
 	      <id>ImageJ-releases</id>
 	      <name>ImageJ Releases</name>
-	      <url>https://maven.imagej.net/content/repositories/releases/</url>
+	      <url>https://maven.scijava.org/content/repositories/releases/</url>
 	    </repository>
+		<repository>
+			<id>ImageJ-public</id>
+			<name>ImageJ Public</name>
+			<url>https://maven.scijava.org/content/repositories/public/</url>
+		</repository>
 	</repositories>
 
 	<dependencies>
 		<dependency>
 			<groupId>net.imagej</groupId>
 			<artifactId>ij</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.ejml</groupId>
+			<artifactId>ejml-all</artifactId>
+			<version>0.41</version>
+		</dependency>
+		<dependency>
+			<groupId>net.haesleinhuepf</groupId>
+			<artifactId>clij2_</artifactId>
+			<version>2.5.1.4</version>
 		</dependency>
 		<dependency>
     		<groupId>sc.fiji</groupId>

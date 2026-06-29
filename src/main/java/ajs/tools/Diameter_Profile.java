@@ -1,7 +1,7 @@
 package ajs.tools;
 import ij.plugin.PlugIn;
-import ij.text.TextPanel;
 import ij.text.TextWindow;
+import ij.measure.ResultsTable;
 import ij.*;
 import ij.gui.*;
 import ij.process.*;
@@ -29,8 +29,6 @@ public class Diameter_Profile implements PlugIn {
 		int rfd=3;
 		
 		ImagePlus imp=WindowManager.getCurrentImage();
-		ij.measure.Calibration cal=imp.getCalibration();
-		double pw=cal.pixelWidth;
 		int sl=imp.getSlice(), fr=imp.getFrame(), frms=imp.getNFrames(),chs=imp.getNChannels(), ch=imp.getC();
 		String title=imp.getTitle();
 		Roi roi=imp.getRoi();
@@ -76,19 +74,19 @@ public class Diameter_Profile implements PlugIn {
 		double[] times=new double[frms];
 		double frint=0;
 		frint=imp.getCalibration().frameInterval;
-		String headings="";
-		if(frms>1){
-			headings="Frame\t";
-			if(frint>0){
-				String timeunit=imp.getCalibration().getTimeUnit();
-				headings+="Frame ("+timeunit+")\t";
-				times=Time_Extractor.extractTimes(imp, false, Time_Extractor.SubTime.EVENT_SET);
-			}
-			
+		String[] headings=null;
+		if(frint>0){
+			headings=new String[3];
+			String timeunit=imp.getCalibration().getTimeUnit();
+			headings[1]="Frame ("+timeunit+")";
+			headings[2]="Diameter";
+			times=Time_Extractor.extractTimes(imp, false, Time_Extractor.SubTime.EVENT_SET);
+		}else {
+			headings=new String[2];
+			headings[1]="Diameter";
 		}
+		headings[0]="Frame";
 		
-		headings+="Diameter";
-	
 		double[][] tp=new double[frms][];
 		int[][] diameterResult=new int[frms][];
 		diameterResult[0]=new int[] {-1,-1};
@@ -158,11 +156,12 @@ public class Diameter_Profile implements PlugIn {
 		wfu.show();
 		if(wfu.escPressed())return;
 
-		TextWindow table=new TextWindow(title+"-diameters",headings, "",500,300);
+		TextWindow table=new TextWindow(title+"-diameters",String.join("\t", headings), "",500,300);
 		table.setVisible(true);
+		ResultsTable drt=table.getResultsTable();
 		int[] thresh=new int[xAveMax];
+		int di=frint>0?2:1;
 		for(int k=0;k<frms;k++){
-			String printstr="";
 			int start=-1,end=-1,diameter=0;
 			for(int x=0;x<xAveMax;x++) {
 				thresh[x]=ip.get(x,k);
@@ -172,28 +171,18 @@ public class Diameter_Profile implements PlugIn {
 			diameter+=2*myrfd;
 			end=start+diameter;
 			diameterResult[k]=new int[] {start,end};
-			
-			if(frms>1){
-				printstr=""+(k+1)+"\t";
-				if(frint>0) {
-					printstr+=""+times[k]+"\t";
-				}
+			drt.setValue(0, drt.getCounter(), k+1);
+			if(frint>0) {
+				drt.setValue(1, drt.getCounter(), times[k]);
 			}
-			printstr+=(""+diameter*pw);
-			table.append(printstr);
+			drt.setValue(di, drt.getCounter(), diameter);
 		}
+		drt.updateResults();
 		
 		if(frms>1) {
 			Plot plot=new Plot("Diameter over time","Time","Diameter");
 			//plot.setLimits(0, xMax, min, max);
-			TextPanel txtp=table.getTextPanel();
-			String[] hds=headings.split("\t");
-			int n=0;
-			for(n=0;n<hds.length;n++) {
-				if(hds[n].equals("Diameter"))break;
-			}
-			double[] diameters=new double[txtp.getLineCount()];
-			for(int i=0;i<txtp.getLineCount();i++) diameters[i]=Double.parseDouble(txtp.getLine(i).split("\t")[n]);
+			double[] diameters=drt.getColumnAsDoubles(di);
 
 			int dmin=-1,dmax=-1,dstart=-1, dstartConstr=-1, dendConstr=-1, dendDilation=-1;
 			double dminVal=65535, dmaxVal=0, aveBase=0, aveBaseFinal=0;
@@ -233,8 +222,12 @@ public class Diameter_Profile implements PlugIn {
 						"\t"+rnd(times[dendConstr]-times[dstartConstr],3)+"\t"+rnd(times[dendDilation]-times[dendConstr],3)+
 						"\t"+rnd(dminVal/aveBase,3)+"\t"+rnd(dmaxVal/aveBase,3));
 				summaryTable.setVisible(true);
-				txtp.updateColumnHeadings(headings+"\tCSDTime\tNorm Diameter");
-				for(int i=0;i<txtp.getLineCount();i++) txtp.setLine(i,txtp.getLine(i)+"\t"+times[i]+"\t"+(diameters[i]/aveBase));
+				//txtp.updateColumnHeadings(headings+"\tCSDTime\tNorm Diameter");
+				for(int i=0;i<drt.getCounter();i++) {
+					drt.setValue("CSDTime", i, times[i]);
+					drt.setValue("Norm Diameter", i, diameters[i]/aveBase);
+				}
+				drt.updateResults();
 			}
 			plot.show();
 			
@@ -267,6 +260,7 @@ public class Diameter_Profile implements PlugIn {
 		}
 		mean/=(double)aveprof.length;
 		
+		if(directThresh>-1) threshLevel="Direct";
 		double thresh=mean;
 		if(threshLevel=="Median") {
 			double[] formedian=Arrays.copyOf(aveprof, aveprof.length);

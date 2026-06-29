@@ -78,7 +78,6 @@ public class GCaMP_Data implements PlugIn {
 		boolean redefDiameter=false;
 		if(roiManager.getSelectedIndexes().length==1) {
 			YesNoCancelDialog ynd=new YesNoCancelDialog(null, "Selected ROI", "An ROI is selected:", "Redo Diameter", "Redo ROI");
-			ynd.show();
 			if(ynd.cancelPressed())return;
 			if(ynd.yesPressed())redefDiameter=true;
 			myroi=roiManager.getSelectedIndex()+1;
@@ -131,6 +130,20 @@ public class GCaMP_Data implements PlugIn {
 		baselinefr=Time_Extractor.getEventFrameFromInfo(imp,true);
 		if(baselinefr<1) {IJ.error("Please define CSD or event frame"); return;}
 		times=Time_Extractor.extractTimes(imp, false, Time_Extractor.SubTime.EVENT_NO_SET);
+		String info=imp.getInfoProperty();
+		int redMin=0;
+		if(info!=null && chs>2 && info.contains("redMin=")) {
+			String[] split=info.split("redMin=");
+			if(split.length>1) {
+				String num="";
+				for(int i=0;i<split[1].length();i++) {
+					char c=split[1].charAt(i);
+					if(Character.isDigit(c))num+=c;
+					else break;
+				}
+				if(!num.equals(""))redMin=Integer.parseInt(num);
+			}
+		}
 		boolean updateShowAll=false;
 		if(myroi<1){
 			roi.setPosition(0, imp.getZ(), 0);
@@ -173,7 +186,7 @@ public class GCaMP_Data implements PlugIn {
 			WindowManager.setCurrentWindow(imp.getWindow());
 			imp.deleteRoi();
 			roiManager.select(myroi-1);
-			double[] means=getStackRoiMeans(imp, new boolean[] {true, false, true});
+			double[] means=getStackRoiMeans(imp, new boolean[] {true, false, true}, redMin);
 			for(int j=0; j<means.length;j++) {
 				table.setValue(""+myroi, j+2, means[j]);
 			}
@@ -355,11 +368,15 @@ public class GCaMP_Data implements PlugIn {
 	}
 	
 	public static void copyStackRoiMeans() {
-		double[] out=getStackRoiMeans(null, null);
+		double[] out=getStackRoiMeans(null, null, 0);
 		copyDoubleArray(out);
 	}
-	
+
 	public static double[] getStackRoiMeans(ImagePlus imp, boolean[] csf) {
+		return getStackRoiMeans(imp, csf, 0);
+	}
+	
+	public static double[] getStackRoiMeans(ImagePlus imp, boolean[] csf, int redMin) {
 		if(imp==null)imp=WindowManager.getCurrentImage();
 		ij.measure.Calibration cal=imp.getCalibration();
 		Roi roi=imp.getRoi();
@@ -392,13 +409,37 @@ public class GCaMP_Data implements PlugIn {
 		frms=frend-frst+1; sls=slend-slst+1; chs=chend-chst+1;
 		double totn=chs*sls*frms;
 		double[] out=new double[chs*sls*frms];
+		if(redMin>0) {
+			if(imp.getNChannels()<3){
+				IJ.error("redMin specified but less than 3 channels in image");
+				redMin=0;
+			}else {
+				IJ.showStatus("Measuring Stack with redMin "+redMin+"...");
+			}
+		}
 		for(int fr=frst; fr<=frend;fr++) {
 			for(int sl=slst; sl<=slend; sl++) {
 				for(int ch=chst; ch<=chend; ch++) {
 					ImageProcessor ip=imp.getStack().getProcessor(imp.getStackIndex(ch, sl, fr));
-					ip.setRoi(roi);
-					ImageStatistics imgstat=ImageStatistics.getStatistics(ip, 127, cal);
-					out[(chs*sls*(fr-frst))+(chs*(sl-slst))+ch-chst]=imgstat.mean;
+					double mean=0;
+					int n=0;
+					if(redMin>0) {
+						ImageProcessor rip=imp.getStack().getProcessor(imp.getStackIndex(3, sl, fr));
+						java.awt.Point[] cps=roi.getContainedPoints();
+						for(int i=0;i < cps.length;i++) {
+							java.awt.Point p=cps[i];
+							if(rip.get(p.x, p.y)>redMin){
+								mean+=(double)ip.get(p.x, p.y);
+								n++;
+							}
+						}
+						mean=mean/n;
+					}else{
+						ip.setRoi(roi);
+						ImageStatistics imgstat=ImageStatistics.getStatistics(ip, 127, cal);
+						mean=imgstat.mean;
+					}
+					out[(chs*sls*(fr-frst))+(chs*(sl-slst))+ch-chst]=mean;
 					IJ.showProgress((double)(((fr-frst+1)*chs*sls)+((sl-slst+1)*chs)+ch-chst+1)/totn);
 				}
 			}

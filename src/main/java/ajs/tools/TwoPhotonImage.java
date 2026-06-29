@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Scanner;
 
 import ij.process.*;
@@ -75,6 +76,7 @@ public class TwoPhotonImage implements AdjustmentListener{
 		if(dir.endsWith("\\")||dir.endsWith("/"))dir=dir.substring(0,dir.length()-1);
 		dir+=File.separator;
 		this.fl=(new File(dir)).listFiles(nohidden);
+		Arrays.sort(fl);
 		setup();
 	}
 	
@@ -470,6 +472,10 @@ public class TwoPhotonImage implements AdjustmentListener{
 			while(!lastfilename.substring(cycind+3,cycind+4).contentEquals("_")) cycind++;
 			infofile=dir+RGBname+".xml";
 			if(!(new File(infofile)).exists())infofile=fl[0].getAbsolutePath();
+			if(!infofile.endsWith(".xml")) {
+				int li=0; while(!fl[li].getName().endsWith(".xml") && li<fl.length)li++;
+				if(li<fl.length)infofile=fl[li].getAbsolutePath();
+			}
 			//String zoom="NA";
 			//if(cycind<5) oifnotime=true;
 			hasT=cycind>5; hasZ=true; hasC=true;
@@ -700,30 +706,37 @@ public class TwoPhotonImage implements AdjustmentListener{
 	}
 	private ImagePlus loadImage(int tpstart, int slstart, int tpend, int slend){
 		tpstart--;slstart--;
-		int totalslices=0;
-		for(int i=0;i<slicearray.size();i++) totalslices+=slicearray.get(i);
-		int sluptoloc=0;
-		for(int i=0;i<(loc);i++) sluptoloc+=slicearray.get(i);
+		//int totalslices=0;
+		//for(int i=0;i<slicearray.size();i++) totalslices+=slicearray.get(i);
+		//int sluptoloc=0;
+		//for(int i=0;i<(loc);i++) sluptoloc+=slicearray.get(i);
 		int slsl=slicearray.get(loc), frms=tpend-tpstart;
 		if(hasAJZ) {slsl=1;tpstart*=this.sls;tpend*=this.sls;}
-		int xcorr=0;
-		for(int i=0;i<fl.length;i++) {
-			if(!fl[i].getName().endsWith(".tif"))xcorr++;
-			else break;
-		}
+		//int xcorr=0;
+		//for(int i=0;i<fl.length;i++) {
+		//	if(!fl[i].getName().endsWith(".tif"))xcorr++;
+		//	else break;
+		//}
 		
 		String[] paths=new String[(tpend-tpstart-1)*slsl*chs+(slend-slstart)*chs];
 		String printer;
+		String base="s_";
+		if(!isOif) {
+			if(infofile!=null && !infofile.contentEquals("") && infofile.endsWith(".xml")) {
+				base=infofile.substring(0,infofile.length()-4);
+			}
+		}
 		int n=0;
 		for(int i=tpstart; i<tpend; i++) {
 			for(int j=0;j<slsl;j++){
 				if(i==tpstart && j==0 && slstart!=0)j=slstart;
 				for(int k=0;k<chs;k++){
 					if(isOif){
-						printer="s_"+(hasC?("C"+String.format("%03d",k+1)):"")+(hasZ?("Z"+String.format("%03d",j+1)):"")+(hasT?("T"+String.format("%03d",i+1)):"")+".tif";
+						printer=base+(hasC?("C"+String.format("%03d",k+1)):"")+(hasZ?("Z"+String.format("%03d",j+1)):"")+(hasT?("T"+String.format("%03d",i+1)):"")+".tif";
 					}else{
+						printer=base+"_Cycle"+String.format("%03d",i+1)+"_CurrentSettings_Ch"+k+"_"+String.format("%06d",j+1)+".tif";
 						//printer=fl[(i*chs*totalslices)+(sluptoloc*chs)+(k*slsl)+j].getName();
-						printer=fl[(i*chs*totalslices)+(sluptoloc*chs)+(k*slsl)+j+xcorr].getName();
+						//printer=fl[(i*chs*totalslices)+(sluptoloc*chs)+(k*slsl)+j+xcorr].getName();
 					}
 					paths[n++]=dir+printer;
 				}

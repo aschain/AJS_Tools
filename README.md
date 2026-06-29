@@ -1,88 +1,99 @@
-This is an example Maven project implementing an ImageJ 1.x plugin.
+# AJS Tools
 
-It is intended as an ideal starting point to develop new ImageJ 1.x plugins
-in an IDE of your choice. You can even collaborate with developers using a
-different IDE than you.
+AJS Tools is a collection of ImageJ/Fiji plugins for microscopy image processing, two-photon data import, and analysis workflows.
 
-* In [Eclipse](http://eclipse.org), for example, it is as simple as
-  _File&gt;Import...&gt;Existing Maven Project_.
+## What this package contains
 
-* In [NetBeans](http://netbeans.org), it is even simpler:
-  _File&gt;Open Project_.
+The tools in this repository support tasks such as:
 
-* The same works in [IntelliJ](http://jetbrains.net).
+- Importing and organizing two-photon imaging datasets
+- Transferring and editing slice labels and image metadata
+- Trimming, projecting, and otherwise manipulating image stacks
+- Measuring diameters and intensity profiles
+- Flattening or correcting image stacks for skull or tissue alignment
+- Automated Threshold-based quantification of cell shapes across time
+- Used for training AI/ML models (Cellpose), and incorporating Cellpose output
+- Analyzing GCaMP / fluorescence signals and exporting summary tables
 
-* If [jEdit](http://jedit.org) is your preferred IDE, you will need the
-  [Maven Plugin](http://plugins.jedit.org/plugins/?MavenPlugin).
+The plugin entry points are defined in [src/main/resources/plugins.config](src/main/resources/plugins.config).
 
-Die-hard command-line developers can use Maven directly by calling `mvn`
-in the project root.
+## Requirements
 
-However you build the project, in the end you will have the `.jar` file
-(called *artifact* in Maven speak) in the `target/` subdirectory.
+- Fiji or ImageJ
+- Maven for compiling
 
-To copy the artifact into the correct place, you can call
-`mvn -Dimagej.app.directory=/path/to/ImageJ.app/`.
-This will not only copy your artifact, but also all the dependencies. Restart
-your ImageJ or call *Help>Refresh Menus* to see your plugin in the menus.
+The build uses ImageJ/Fiji dependencies and a few additional packages such as CLIJ2, Skeletonize3D, and AnalyzeSkeleton.
 
-Developing plugins in an IDE is convenient, especially for debugging. To
-that end, the plugin contains a `main` method which sets the `plugins.dir`
-system property (so that the plugin is added to the Plugins menu), starts
-ImageJ, loads an image and runs the plugin. See also
-[this page](https://imagej.net/Debugging#Debugging_plugins_in_an_IDE_.28Netbeans.2C_IntelliJ.2C_Eclipse.2C_etc.29)
-for information how ImageJ makes it easier to debug in IDEs.
+## Build
 
-Since this project is intended as a starting point for your own
-developments, it is in the public domain.
+From the project root, run:
 
-How to use this project as a starting point
-===========================================
+```bash
+mvn package
+```
 
-Either
+This produces a plugin jar in the target directory.
 
-* `git clone git://github.com/imagej/example-legacy-plugin`, or
-* unpack https://github.com/imagej/example-legacy-plugin/archive/master.zip
+## Install
 
-Then:
+After building, copy the generated jar from the target folder into your Fiji/ImageJ plugins directory, or if you have your imagej directory defined in maven, run:
 
-1. Edit the `pom.xml` file. Every entry should be pretty self-explanatory.
-   In particular, change
-    1. the *artifactId* (**NOTE**: should contain a '_' character)
-    2. the *groupId*, ideally to a reverse domain name your organization owns
-    3. the *version* (note that you typically want to use a version number
-       ending in *-SNAPSHOT* to mark it as a work in progress rather than a
-       final version)
-    4. the *dependencies* (read how to specify the correct
-       *groupId/artifactId/version* triplet
-       [here](https://imagej.net/Maven#How_to_find_a_dependency.27s_groupId.2FartifactId.2Fversion_.28GAV.29.3F))
-    5. the *developer* information
-    6. the *scm* information
-2. Remove the `Process_Pixels.java` file and add your own `.java` files
-   to `src/main/java/<package>/` (if you need supporting files -- like icons
-   -- in the resulting `.jar` file, put them into `src/main/resources/`)
-3. Edit `src/main/resources/plugins.config`
-4. Replace the contents of `README.md` with information about your project.
+```bash
+mvn install
+```
 
-If you cloned the `example-legacy-plugin` repository, you probably want to
-publish the result in your own repository:
+## Main plugin tools
 
-1. Call `git status` to verify .gitignore lists all the files (or file
-   patterns) that should be ignored
-2. Call `git add .` and `git add -u` to stage the current files for
-   commit
-3. Call `git commit` or `git gui` to commit the changes
-4. [Create a new GitHub repository](https://github.com/new)
-5. `git remote set-url origin git@github.com:<username>/<projectname>`
-6. `git push origin HEAD`
+### Image import and metadata
 
-### Eclipse: To ensure that Maven copies the plugin to your ImageJ folder
+- TwoPhoton Import — opens two-photon image directories and imports stacks from common microscopy folders.
+- Get 2p Info — prints or exposes two-photon image metadata and location information.
+- Run AJS-Tools plugin — utility entry point for miscellaneous helper actions.
+- AJ Options — opens options for the TwoPhoton Import workflow.
 
-1. Go to _Run Configurations..._
-2. Choose _Maven Build_
-3. Add the following parameter:
-    - name: `imagej.app.directory`
-    - value: `/path/to/ImageJ.app/`
+### Slice labels and image info
 
-This ensures that the final `.jar` file will also be copied to your ImageJ
-plugins folder everytime you run the Maven Build
+- Slicelabel Transfer — transfers slice labels from one image stack to another.
+- Slicelabel Editor — Opens an editor window and allows text editing of slicelables (Just hit save in the editor to write the changes to the image in memory, the image must be saved independently to save all changes to disk!).
+- Info Editor — a variant of the editor for editing the image info field.
+- Print Times — overlays, prints, or gathers timing information on multi-frame image stacks based on times imported from Olympus-style pty files found in the slice labels (a line with ptytime: [ms after start time], and optionally a line with Starttime: [linux epoch start time]).
+
+### Measurement and analysis
+
+- Diameter Profile — measures vessel or axon diameter profiles from line or rectangle selections.
+- Thresh-Cell-Transfer — interactive workflow for threshold-based cell analysis, ROI transfer to AI/ML-compatible mask images, and exported measurements including circularity.
+- DC Pt Reslice — Create xz and yz images with information from the previous workflow to determine changes in z-positions of selected cells.
+- Copy Stack Roi Means — copies ROI mean intensity values from a stack.
+- GCaMP Data and Figure — analyzes GCaMP fluorescence traces and creates simple summary figures for importing into data analysis software.
+- Distance From Roi to Labels — measures distances from ROI selections to label maps. Helpful for creating an ROI of blood vessels, and then calculating the distance of each selected (for example, in Thresh-Cell-Transfer) cell's distance to a blood vessel.
+
+### Stack adjustment and projection
+
+- Stack Trimmer — trims stacks by channel, slice, or frame range.
+- Normalize Brightness — normalizes image brightness across selected dimensions based on projections.
+- Image Translator by Pt — translates each slice of a frame of a multi-frame image based on selected or measured point locations or from previous SliceReg measurements.
+- Combine by Pt — combines two multidimensional images into one larger image with alignment based on selecting a common point in each image.
+- CCR2ConcatChs — Checks each open image for a matching image taken in the same location, but with a different wavelength, and concatenates the red channel of 730 nm image onto the 900 nm image (useful for sequential images of GFP/tdTomato in a mosaic).
+- XYZ-Shift Channel — shifts a channel in X/Y/Z. Useful for fixing slight mismatches between channels in the previous plugin.
+- Skull Leveler — Flattens or levels image stacks using map-based or Thin-Plate-Spline-based approaches. For example, image stacks of macrophages in the dura can be spread over many z-planes due to curvature of the skull. This plugin detects this curvature based on SHG of the skull captured in the blue channel and creates a heat map of the z-displacement and warps the image to correct for this. Alternately, cell positions can be selected in x,y,z with multi-point tool and a Thin Plate Spline technique (using GPU accelleration) is used for the correction.
+- T Projector — Like ImageJ stack Z-projections but across time instead of z-slices.
+- Z Step Max — performs a max intensity z-kernel filter.
+- Concat Chs — concatenates images by their channels. Images must have matching slices and frames (found in Image > Stacks > Tools menu instead of Plugins > AJS).
+
+## Source layout
+
+The main implementation classes are in [src/main/java/ajs/tools](src/main/java/ajs/tools). Key files include:
+
+- [src/main/java/ajs/tools/TwoPhoton_Import.java](src/main/java/ajs/tools/TwoPhoton_Import.java)
+- [src/main/java/ajs/tools/Slicelabel_Transfer.java](src/main/java/ajs/tools/Slicelabel_Transfer.java)
+- [src/main/java/ajs/tools/Slicelabel_Editor.java](src/main/java/ajs/tools/Slicelabel_Editor.java)
+- [src/main/java/ajs/tools/Time_Extractor.java](src/main/java/ajs/tools/Time_Extractor.java)
+- [src/main/java/ajs/tools/Diameter_Profile.java](src/main/java/ajs/tools/Diameter_Profile.java)
+- [src/main/java/ajs/tools/Thresh_Cell_Transfer.java](src/main/java/ajs/tools/Thresh_Cell_Transfer.java)
+- [src/main/java/ajs/tools/GCaMP_Data.java](src/main/java/ajs/tools/GCaMP_Data.java)
+- [src/main/java/ajs/tools/Skull_Leveler.java](src/main/java/ajs/tools/Skull_Leveler.java)
+- [src/main/java/ajs/tools/AJ_Misc_Plugins.java](src/main/java/ajs/tools/AJ_Misc_Plugins.java)
+
+## Notes
+
+This project is an ImageJ 1.x plugin bundle and may require a Fiji-compatible environment for the most reliable experience.

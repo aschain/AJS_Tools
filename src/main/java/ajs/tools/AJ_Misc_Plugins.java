@@ -3,6 +3,11 @@ package ajs.tools;
 import java.awt.Frame;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.event.ActionEvent;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -12,12 +17,18 @@ import ij.gui.GenericDialog;
 import ij.gui.HistogramWindow;
 import ij.gui.Overlay;
 import ij.gui.Plot;
+import ij.gui.PointRoi;
 import ij.gui.Roi;
+import ij.gui.YesNoCancelDialog;
 import ij.measure.Calibration;
-import ij.measure.CurveFitter;
 import ij.measure.ResultsTable;
 import ij.plugin.Duplicator;
 import ij.plugin.PlugIn;
+import ij.plugin.filter.EDM;
+import ij.plugin.filter.ThresholdToSelection;
+import ij.plugin.frame.RoiManager;
+import ij.process.Blitter;
+import ij.process.ByteProcessor;
 import ij.process.FloatProcessor;
 import ij.process.ImageProcessor;
 import ij.process.ImageStatistics;
@@ -204,7 +215,7 @@ public class AJ_Misc_Plugins implements PlugIn {
 			ImagePlus histimp=new ImagePlus("temp");
 			histimp.setProcessor(new FloatProcessor(rg));
 			HistogramWindow hist=new HistogramWindow("Color Assoc Hist", histimp, 256);
-			hist.show();
+			hist.setVisible(true);
 		}
 	}
 	
@@ -229,10 +240,9 @@ public class AJ_Misc_Plugins implements PlugIn {
 		String zchoice="Max Intensity";
 		boolean useResults=false;
 		int nResults=0;
-		TextPanel results=null;
-		if(WindowManager.getWindow("Results")!=null) {
-			results=IJ.getTextPanel();
-			nResults=results.getLineCount();
+		ResultsTable rt=ResultsTable.getResultsTable("Results");
+		if(rt!=null) {
+			nResults=rt.getCounter();
 		}
 		int[] whichsls=new int[] {1,1};
 		String abchopts=defaultNormalizationChs;
@@ -283,9 +293,9 @@ public class AJ_Misc_Plugins implements PlugIn {
 		double maxmean=0;
 		int alldim=1;if(aballzproj){if(dosls){alldim=frms;}else{alldim=sls;}}
 		if(useResults){
+			int colind=rt.getColumnIndex("Mean");
 			for(int i=0;i<nResults;i++){
-				ResultsTable rt=results.getResultsTable();
-				means[i]=rt.getValueAsDouble(rt.getColumnIndex("Mean"), i);
+				means[i]=rt.getValueAsDouble(colind, i);
 				maxmean=Math.max(means[i],maxmean);
 			}
 		}
@@ -397,7 +407,7 @@ public class AJ_Misc_Plugins implements PlugIn {
 		if(tw==null) {
 			ResultsTable rt=ResultsTable.getResultsTable();
 			//if(rt.size()!=imp.getNFrames()){IJ.error("need to measure all frames");return;}
-			if(!rt.columnExists("X") || !rt.columnExists("Y") || ! rt.columnExists("Frame")){IJ.error("No Results or StackReg Results found");return null;}
+			if(rt==null || !rt.columnExists("X") || !rt.columnExists("Y") || ! rt.columnExists("Frame")){IJ.error("No Results or StackReg Results found");return null;}
 			rt.sort("Frame");
 			xs=rt.getColumnAsDoubles(rt.getColumnIndex("X"));
 			ys=rt.getColumnAsDoubles(rt.getColumnIndex("Y"));
@@ -656,218 +666,6 @@ public class AJ_Misc_Plugins implements PlugIn {
 		imp.setProperty("Info", oinfo);
 	}
 	
-	public static ImagePlus SkullLeveler() {
-		return SkullLeveler(null);
-	}
-	
-	public static ImagePlus SkullLeveler(ImagePlus oimp) {
-		final String[] METHODS=new String[]{"Mean","Median","Mid","Top 1/3","MaxMean","X-Mean"};
-		//Mean - Top 1/3 is calculated on each z-column to generate the threshold
-		//MaxMean means take the mean of the z-max of channel 1
-		//X-Mean just the mean of the current y-slice not the whole xy max proj of the skull
-		//final String[] METHODS_MP=new String[]{"Min","Two-Mac"};
-		//final String[] MAPTYPES=new String[]{"1st Channel - Skull", "2nd Channel - Mac bi-layer"};
-		final String[] TMETHODS=new String[] {"First Frame", "Ave T-projection", "For Each Frame"};
-		final int MINXMEANVAL=50;
-		final String MAP_SUFFIX="-SkullLeveler-map";
-		//String maptype=MAPTYPES[0];
-		String tmethod=TMETHODS[0];
-		int rfd=3;
-		int red_fac=4;
-		int rise=4;
-		String method="X-Mean";
-		int thresh=-1; //If defined, use this as the thresh instead of calculating
-		int FIT=CurveFitter.POLY2;
-		//boolean nonflatzero=false;
-		
-		if(oimp==null)oimp=WindowManager.getCurrentImage();
-		if(oimp==null) {IJ.noImage();return null;}
-		int h=oimp.getHeight(), w=oimp.getWidth(), chs=oimp.getNChannels(), sls=oimp.getNSlices(), frms=oimp.getNFrames();
-		
-		String[] imtitles=WindowManager.getImageTitles();
-		ArrayList<String> mapnames=new ArrayList<String>();
-		mapnames.add("Generate new map");
-		for(int i=0;i<imtitles.length;i++) {
-			if(imtitles[i].contains(MAP_SUFFIX)) {mapnames.add(imtitles[i]);}
-		}
-		String mapname="";
-		
-		String title=oimp.getTitle();
-		String maptitle=title+MAP_SUFFIX;
-		ImagePlus mapimp=null;
-		GenericDialog gd=new GenericDialog("SkullLeveler");
-		gd.addMessage("Working on "+title);
-		//gd.addChoice("Use Channel and Type:",MAPTYPES,maptype);
-		gd.addChoice("Threshold Method:",METHODS,method);
-		if(oimp.getNFrames()>1)gd.addChoice("Map generation for frames?", TMETHODS, TMETHODS[2]);
-		gd.addNumericField("XY-Smoothing",red_fac,0);
-		gd.addNumericField("Z-Smoothing",rfd,0);
-		gd.addNumericField("Static rise above skull bottom:",rise,0);
-		gd.addNumericField("Use this thresh instead of method:",-1,0);
-		//gd.addCheckbox("Nonflat zero?",nonflatzero);
-		if(mapnames.size()>1)gd.addChoice("Use Open SkullMap:", (String[])mapnames.toArray(new String[mapnames.size()]), mapnames.get(0));
-		gd.showDialog();
-		if(gd.wasCanceled())return null;
-		//maptype=gd.getNextChoice();
-		method=gd.getNextChoice();
-		if(oimp.getNFrames()>1)tmethod=gd.getNextChoice();
-		red_fac=(int)gd.getNextNumber();
-		rfd=(int)gd.getNextNumber();
-		rise=(int)gd.getNextNumber();
-		thresh=(int)gd.getNextNumber();
-		//nonflatzero=gd.getNextBoolean();
-		if(mapnames.size()>1)mapname=gd.getNextChoice();
-		if(!mapname.contentEquals("Generate new map"))mapimp=WindowManager.getImage(mapname);
-		
-		ImageStack mapstack=null;
-		FloatProcessor fp=null;
-		int zmin=65535, zmax=0;
-		
-		if(mapimp==null) {
-			Duplicator dup=new Duplicator();
-			int ffrms=tmethod.contentEquals(TMETHODS[0])?1:oimp.getNFrames();
-			int mapch=1;
-			//if(maptype.contentEquals(MAPTYPES[1])){
-			//	mapch=2;
-			//	if(!(method.contentEquals("Min")|| method.contentEquals("Two-Mac")))method="CurveFit";
-			//}
-			ImagePlus dimp=dup.run(oimp,mapch,mapch,1,oimp.getNSlices(),1,ffrms);
-			dimp.show();
-			ffrms=tmethod.contentEquals(TMETHODS[2])?frms:1;
-			dimp=resizer(dimp, dimp.getWidth()/red_fac, dimp.getHeight()/red_fac, sls, (tmethod.contentEquals(TMETHODS[2])?frms:1));
-			Calibration cal=dimp.getCalibration();
-			cal.fps=1; cal.pixelWidth=1; cal.pixelHeight=1; cal.pixelDepth=1;
-			dimp.setCalibration(cal);
-			ij.plugin.filter.RankFilters rf=new ij.plugin.filter.RankFilters();
-			ImageStack dst=dimp.getStack();
-			for(int i=0;i<dst.getSize();i++) {
-				ImageProcessor ip=dst.getProcessor(i+1);
-				rf.rank(ip, 100/red_fac, ij.plugin.filter.RankFilters.MEDIAN);
-			}
-			if(method.contentEquals("MaxMean")){
-				ImagePlus zimp=ij.plugin.ZProjector.run(dimp,"Max Intensity");
-				ImageProcessor ip=zimp.getProcessor();
-				int mean=0;
-				for(int y=0;y<zimp.getHeight();y++)
-					for(int x=0;x<zimp.getWidth();x++)
-						mean+=ip.get(x,y);
-				mean/=(zimp.getHeight()*zimp.getWidth());
-				thresh=mean;
-				IJ.log("SkullLeveler using mean: "+mean);
-			}
-			int rh=dimp.getHeight(), rw=dimp.getWidth(), rfrms=dimp.getNFrames();
-	
-			mapstack=new ImageStack(rw,rh);
-			CurveFitter cf=null;
-			double[] xline=new double[sls];
-			for(int i=0;i<sls;i++)xline[i]=(double)i;
-			
-			//IJ.log("rfrms"+rfrms+" dimpf"+dimp.getNFrames());
-			for(int fr=0;fr<rfrms;fr++) {
-				fp=new FloatProcessor(rw,rh);
-				for(int y=0;y<rh;y++){
-					if(method.contentEquals("X-Mean")){
-						int mean=0;
-						for(int x=0;x<rw;x++){
-							for(int z=0;z<sls;z++){
-								int val=dst.getProcessor(z+fr*sls+1).get(x,y);
-								if(val>MINXMEANVAL)mean+=val;
-							}
-						}
-						mean/=(rw*sls);
-						thresh=mean;
-					}
-					for(int x=0;x<rw;x++){
-						double[] zline=new double[sls];
-						for(int z=0;z<sls;z++){
-							zline[z]=(double)dst.getProcessor(z+fr*sls+1).get(x,y);
-						}
-						int skullz=0;
-						if(method.contentEquals("CurveFit")) {
-							cf=new CurveFitter(xline,zline);
-							cf.doFit(FIT);
-							if(cf.getStatus()!=ij.measure.Minimizer.INITIALIZATION_FAILURE){
-								double[] params=cf.getParams();
-								if(FIT==CurveFitter.POLY2){
-									//for ax2+bx+c=y, params are returned [0] is c, [1] is b, [2] is a.
-									//and the minimum of a polynomial is -b/2a
-									//CurveFitter actually calls the parameters cx2+bx+a instead of ax2+bx+c
-									int ytmp=(int)(-params[1]/(2*params[2]));
-									if(ytmp>0 && ytmp<(h-1))skullz=ytmp;
-								}else if(FIT==CurveFitter.POLY4){
-									for(int i=0;i<h;i++){
-										//try to find where two peaks are then get the middle?
-									}
-								}
-							}
-						}else if(method.contentEquals("Two-Mac")){
-							//mac bilayer
-						}else {
-							int[] zlineThresh=Diameter_Profile.getThresh(zline,rfd,method,false,thresh);
-							for(int i=zlineThresh.length-1;i>=0;i--){
-								if(zlineThresh[i]>0){skullz=i; break;}
-							}
-						}
-						skullz+=-rise;
-						fp.setf(x, y, (float)skullz);
-						//xs[x]=x; 
-						if(skullz<zmin)zmin=skullz;
-						if(skullz>zmax)zmax=skullz;
-					}
-				}
-				mapstack.addSlice(fp);
-			}
-			mapimp=new ImagePlus(maptitle,mapstack);
-			java.awt.image.IndexColorModel cm=ij.plugin.LutLoader.getLut("Thermal");
-			if(cm!=null)
-				mapimp.setLut(new ij.process.LUT(cm,zmin,zmax));
-			mapimp.show();
-			dimp.changes=false;
-			dimp.close();
-			mapimp.setProperty("Info","Z-Range:"+zmin+":"+zmax+"\n"+"Method:"+tmethod);
-		}else{
-			fp=(FloatProcessor)mapimp.getProcessor();
-			mapstack=mapimp.getStack();
-			int miw=mapimp.getWidth();
-			red_fac=w/miw;
-			//String zrange=mapimp.getInfoProperty().split("\n")[0];
-			//zmin=Integer.parseInt(zrange.split(":")[1]);
-			//zmax=Integer.parseInt(zrange.split(":")[2]);
-		}
-		
-		ImagePlus finalimp=IJ.createImage(oimp.getTitle()+"-SkullLeveled", ""+oimp.getBitDepth()+"-bit"+(oimp.isComposite()?" composite":""), w, h, chs, sls, frms);
-		boolean fullstack=mapstack.getSize()==frms;
-
-		for(int fr=0; fr<frms; fr++){
-			if(fullstack)fp=(FloatProcessor)(mapstack.getProcessor(fr+1));
-			for(int sl=0; sl<sls; sl++){
-				IJ.showStatus("SkullLeveling "+" T"+(fr+1)+" Z"+(sl+1));
-				for(int ch=0; ch<chs; ch++){
-					IJ.showProgress((double)(ch+sl*chs+fr*sls*chs+1)/(double)(chs*sls*frms));
-					ImageProcessor ip=finalimp.getStack().getProcessor(finalimp.getStackIndex(ch+1,sl+1,fr+1));
-					for(int y=0; y<h; y++){
-						for(int x=0; x<w; x++){
-							int xfp=Math.min(x/red_fac, fp.getWidth()-1);
-							int yfp=Math.min(y/red_fac, fp.getHeight()-1);
-							int zskull=(int)fp.getf(xfp,yfp);
-							int value=0;
-							if(((sl+zskull)<sls) && ((sl+zskull)>=0)){
-								value=oimp.getStack().getProcessor(oimp.getStackIndex(ch+1,sl+zskull+1,fr+1)).get(x,y);
-							}
-							ip.set(x,y,value);
-						}
-					}
-				}
-			}
-		}
-		finalimp.setCalibration(oimp.getCalibration());
-		finalimp.show();
-		if(finalimp instanceof CompositeImage && oimp instanceof CompositeImage)((CompositeImage)finalimp).setLuts(((CompositeImage)oimp).getLuts());
-		finalimp.updateAndDraw();
-		IJ.showStatus("Skull-Leveler complete");
-		return finalimp;
-	}
-	
 	public static ImagePlus resizer(ImagePlus imp, int newWidth, int newHeight, int newDepth, int newFrames) {
 		int origWidth=imp.getWidth(), origHeight=imp.getHeight(), chs=imp.getNChannels(), origSlices=imp.getNSlices(), origFrames=imp.getNFrames();
 		ImageProcessor ip=imp.getProcessor();
@@ -913,4 +711,669 @@ public class AJ_Misc_Plugins implements PlugIn {
 		if(output!=imp) {imp.changes=false; imp.close();}
 		return output;
 	}
+	
+	public static void distanceFromRoiToLabelMap() {
+		distanceToRoiFromLabelMap(WindowManager.getCurrentImage());
+	}
+	
+	public static void distanceToRoiFromLabelMap(ImagePlus imp) {
+		if(imp==null) {IJ.noImage();return;}
+		int width=imp.getWidth(), height=imp.getHeight(), frms=imp.getNFrames();
+		
+		Roi compareRoi=imp.getRoi();
+		if(compareRoi==null || (compareRoi.getType()==Roi.RECTANGLE && compareRoi.getBounds().equals(new Rectangle(0,0,width,height)))) {
+			RoiManager roiManager=RoiManager.getRoiManager();
+			if(roiManager.getCount()<1) {IJ.error("Need ROI on image or in RoiManager"); return;}
+			compareRoi=roiManager.getRoi(0);
+			imp.setRoi(compareRoi);
+		}
+		
+		String headings="Cell\tFrame\tAxonDistance";
+		
+		TextWindow tw=new TextWindow(imp.getTitle()+"-axonDist.csv",headings,"",800,400);
+		java.awt.MenuItem mi=tw.getMenuBar().getMenu(0).getItem(0);
+		mi.removeActionListener(tw);
+		mi.addActionListener(new java.awt.event.ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+				textWindowCsvSaveAs(tw);
+			}
+		});
+		double px=imp.getCalibration().pixelWidth;
+		if(px==1.0) {
+			px=IJ.getNumber("Pixel Width is 1, change?", 0.495);
+			if(px==IJ.CANCELED)px=1.0;
+		}
+		
+		for(int fr=0; fr<frms; fr++) {
+			imp.setPosition(imp.getC(), imp.getZ(), fr+1);
+			ImageProcessor ip= imp.getProcessor();
+			int maxcell=0;
+			for(int y=0;y<height;y++)
+				for(int x=0;x<width;x++)
+					if(ip.get(x,y)>maxcell)maxcell=ip.get(x,y);
+			ThresholdToSelection tts=new ThresholdToSelection();
+			for(int i=0; i<maxcell; i++) {
+				ip.setThreshold(i+1, i+1);
+				Roi croi=tts.convert(ip);
+				if(croi==null) {
+					IJ.log(IJ.pad((i+1), 3)+" \tNA");
+					continue;
+				}
+				String min="NA";
+				Double distance=distanceFromRoiToRoi(compareRoi, croi);
+				if(distance!=null) min=""+(distance.doubleValue()*px);
+				tw.append(""+(i+1)+"\t"+(fr+1)+"\t"+min);
+			}
+		}
+	}
+	
+	public static Double distanceFromRoiToRoi(Roi compareRoi, Roi roi) {
+		if(roi == null || compareRoi == null) return null;
+		Rectangle cb=compareRoi.getBounds();
+		Rectangle rb=roi.getBounds();
+		ImageProcessor rip= new ByteProcessor(Math.max(cb.width+cb.x,rb.width+rb.x),Math.max(cb.height+cb.y,rb.height+rb.y));
+		rip.setColor(255);
+		rip.fill(roi);
+		rip.invert();
+		FloatProcessor edm = new EDM().makeFloatEDM(rip, 0, false);
+		edm.setRoi(compareRoi);
+		ImageStatistics imstat=ImageStatistics.getStatistics(edm,ImageStatistics.MIN_MAX,null);
+		if(imstat==null)return null;
+		return imstat.min;
+	}
+	
+	public static void textWindowCsvSave(TextWindow rtw, String path) {
+		if(path==null) {
+			textWindowCsvSaveAs(rtw);
+			return;
+		}
+		String text=rtw.getTextPanel().getText();
+		text=text.replaceAll("\t", ",");
+		try{
+			FileWriter fw=new FileWriter(path);
+			fw.append(text);
+			fw.close();
+		} catch (Exception e) {e.printStackTrace();}
+	}
+	
+	public static void textWindowCsvSaveAs(TextWindow rtw) {
+		javax.swing.JFileChooser fileChooser = new javax.swing.JFileChooser();
+        fileChooser.setDialogTitle("Save As");
+        fileChooser.setSelectedFile(new File(ij.io.OpenDialog.getDefaultDirectory()+rtw.getTitle()));
+
+        int userSelection = fileChooser.showSaveDialog(null);
+
+        if (userSelection == javax.swing.JFileChooser.APPROVE_OPTION) {
+        	if(fileChooser.getSelectedFile().exists()) {
+        		YesNoCancelDialog ync=new YesNoCancelDialog(null, "Overwrite file?","Ok to overwrite?");
+        		if(!ync.yesPressed()) {IJ.showStatus("Write cancelled"); return;}
+        	}
+            String path = fileChooser.getSelectedFile().getAbsolutePath();
+            textWindowCsvSave(rtw,path);
+        }else {IJ.log("File not saved");}
+	}
+
+	public static String[] readFile(String path){
+		ArrayList<String> lines=new ArrayList<String>();
+		try {
+			BufferedReader br=new BufferedReader(new FileReader(path));
+			String line;
+			while((line=br.readLine())!=null) {
+				lines.add(line);
+			}
+			br.close();
+		} catch (Exception e) {
+			IJ.error("Failed to read file: " + e.getMessage());
+			return null;
+		}
+		return lines.toArray(new String[lines.size()]);
+	}
+
+	public static double[][] getPointsFromCSV(String[] lines, String labelFilter, int frame, ImagePlus imp) {
+		if(imp==null) imp=WindowManager.getCurrentImage();
+		if(imp==null) {IJ.noImage(); return null;}
+		int ch=2;
+		if(imp.getNChannels()<ch) {
+			ch=1;
+		}
+		double pixelWidth=imp.getCalibration().pixelWidth;
+		if(lines==null || lines.length==0) {
+			IJ.error("No lines read from file");
+			return null;
+		}
+		ArrayList<double[]> points=new ArrayList<double[]>();
+		for(String line: lines) {
+			if(line.startsWith("Label")) continue;
+			if(labelFilter!=null && !line.startsWith(labelFilter))continue;
+			String[] parts=line.split("[,\t ]+");
+			if(parts.length<Thresh_Cell_Transfer.HEADINGS.FRAME.getIndex())continue;
+			int frm=Integer.parseInt(parts[Thresh_Cell_Transfer.HEADINGS.FRAME.getIndex()]);
+			if(frame>0 && frm!=frame)continue;
+			int x=(int)(Double.parseDouble(parts[Thresh_Cell_Transfer.HEADINGS.X.getIndex()].trim())/pixelWidth);
+			int y=(int)(Double.parseDouble(parts[Thresh_Cell_Transfer.HEADINGS.Y.getIndex()].trim())/pixelWidth);
+			int z=Integer.parseInt(parts[Thresh_Cell_Transfer.HEADINGS.SLICE.getIndex()]);
+			points.add(new double[] {x,y,z});
+		}
+		return points.toArray(new double[points.size()][]);
+	}
+
+    public static void ptsToPointRoi(double[][] pts, ImagePlus imp) {
+        PointRoi proi=new PointRoi();
+        for(double[] pt : pts) {
+            int x=(int)pt[0];
+            int y=(int)pt[1];
+            int z=(int)pt[2];
+            proi.addPoint(x, y, imp.getStackIndex(imp.getC(), z, imp.getT()));
+        }
+        imp.setRoi(proi);
+    }
+
+	public static ImagePlus resliceProject(ImagePlus imp, String axis) {
+		if(imp==null) imp=WindowManager.getCurrentImage();
+		if(imp==null) {IJ.noImage(); return null;}
+		return resliceProject(imp,null,axis,ij.plugin.ZProjector.AVG_METHOD,false,1.0,1,imp.getNChannels(),1,imp.getNFrames());
+	}
+
+	public static ImagePlus resliceProject(ImagePlus imp, Roi roi, String axis, int method, boolean avoidInterpolation, double outputSpacing, int stCh, int endCh, int stFrame, int endFrame) {
+		if(imp==null) imp=WindowManager.getCurrentImage();
+		if(imp==null) {IJ.noImage(); return null;}
+		String projTitle=imp.getTitle()+"-ResliceProj";
+		int n=1;
+		while(WindowManager.getImage(projTitle)!=null) {
+			projTitle=projTitle+"_"+IJ.pad(n,2);
+			n++;
+		}
+		if(roi==null)roi=imp.getRoi();
+		if(roi==null)roi=new Roi(0,0,imp.getWidth(),imp.getHeight());
+
+		Rectangle b=roi.getBounds();
+		if(b.x<0)b.x=0; if(b.y<0)b.y=0; 
+		if(b.x>imp.getWidth())b.x=imp.getWidth();
+		if(b.y>imp.getHeight()-1)b.y=imp.getHeight()-1;
+		if(b.x+b.width>imp.getWidth())b.width=imp.getWidth()-b.x;
+		if(b.y+b.height>imp.getHeight())b.height=imp.getHeight()-b.y;
+		int sls=imp.getNSlices();
+		Calibration cal=imp.getCalibration();
+		int width=b.width, height=(int)(sls*cal.pixelDepth/cal.pixelWidth), depth=b.height;
+		boolean left=false, noproj=false;
+		if(axis.toLowerCase().contentEquals("y") || axis.toLowerCase().contentEquals("left")) {
+			width=b.height; depth=b.width;
+			left=true;
+		}
+		if(method < 0) {
+			noproj=true;
+		}
+		if(method > 3){
+			IJ.error("Cannot handle method: "+method);
+			return null;
+		}
+		if(avoidInterpolation) height=sls;
+		ImagePlus proj=IJ.createHyperStack(projTitle, width, height, endCh-stCh+1, noproj?depth:1, endFrame-stFrame+1, imp.getBitDepth());
+
+		double all=(endFrame-stFrame+1)*(endCh-stCh+1);
+		for(int frm=stFrame; frm<=endFrame; frm++) {
+			for(int ch=stCh; ch<=endCh; ch++){
+				IJ.showProgress((double)(((frm-stFrame)*(endCh-stCh+1))+(ch-stCh)+1)/all);
+				int cch=ch-stCh+1, cfr=frm-stFrame+1;
+				for(int d1=0; d1<width; d1++) {
+					if(!noproj){
+						double[] zs=new double[sls];
+						ImageProcessor pip=proj.getStack().getProcessor(proj.getStackIndex(cch, 1, cfr));
+						for(int sl=1; sl<=sls; sl++) {
+							ImageProcessor ip=imp.getStack().getProcessor(imp.getStackIndex(ch, sl, frm));
+							double endval=0;
+							for(int d2=0; d2<depth; d2++) {
+								int val=left?ip.get(b.x+d2, b.y+d1):ip.get(b.x+d1, b.y+d2);
+								if(method==ij.plugin.ZProjector.MAX_METHOD) {
+									endval=Math.max(val, endval);
+								}else if(method==ij.plugin.ZProjector.MIN_METHOD) {
+									if(d2==0)endval=val;
+									else endval=Math.min(val, endval);
+								}else {
+									endval+=val;
+								}
+							}
+							if(method==ij.plugin.ZProjector.AVG_METHOD)endval=endval/b.height;
+							zs[sl-1]=endval;
+							if(avoidInterpolation)pip.set(d1, sl-1, (int)endval);
+						}
+						if(!avoidInterpolation) {
+							int[] interp=interpolate(zs, height);
+							for(int sl=0; sl<height; sl++) {
+								pip.set(d1, sl, interp[sl]);
+							}
+						}
+					}else{
+						for(int d2=0; d2<depth; d2++) {
+							double[] zs=new double[sls];
+							ImageProcessor pip=proj.getStack().getProcessor(proj.getStackIndex(cch, d2+1, cfr));
+							for(int sl=1; sl<=sls; sl++) {
+								ImageProcessor ip=imp.getStack().getProcessor(imp.getStackIndex(ch, sl, frm));
+								zs[sl-1]=left?ip.get(b.x+d2, b.y+d1):ip.get(b.x+d1, b.y+d2);
+								if(avoidInterpolation)pip.set(d1, sl-1, (int)zs[sl-1]);
+							}
+							if(!avoidInterpolation) {
+								int[] interp=interpolate(zs, height);
+								for(int sl=0; sl<height; sl++) {
+									pip.set(d1, sl, interp[sl]);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		if(proj instanceof CompositeImage && imp instanceof CompositeImage) {
+			((CompositeImage)proj).copyLuts(imp);
+			((CompositeImage)proj).setMode(imp.getCompositeMode());
+		}
+		return proj;
+	}
+
+	static private int[] interpolate(double[] zs, int newLength) {
+		int[] out=new int[newLength];
+		double jump=(double)newLength/(double)(zs.length);
+		int next=0, ni=0;
+		double bval=0, nval=zs[0];
+		for(int i=0; i<newLength; i++) {
+			if(i==next) {
+				ni++;
+				if(ni>=zs.length)ni=zs.length-1;
+				next=(int)Math.ceil(jump*(double)ni);
+				bval=nval; nval=zs[ni];
+			}
+			double ndist=((double)i-((double)(ni-1)*jump))/jump, bdist=1.0-ndist;
+			out[i]=(int)(bval*bdist+nval*ndist);
+		}
+		return out;
+	}
+
+	static public void concatenateChannels() {
+		String[] titles=WindowManager.getImageTitles().length>1?WindowManager.getImageTitles():null;
+		if(titles==null || titles.length<2) {IJ.error("Need at least two images"); return;}
+		String curImageTitle=WindowManager.getCurrentImage()!=null?WindowManager.getCurrentImage().getTitle():"";
+		int chmax=0;
+		for(String title: titles) {
+			ImagePlus imp=WindowManager.getImage(title);
+			if(imp!=null)chmax=Math.max(chmax, imp.getNChannels());
+		}
+		String chStr="Ch 1";
+		for(int i=2; i<=chmax; i++) {
+			chStr=chStr+", Ch "+i;
+		}
+		String[] labels=chStr.split(", ");
+		boolean[] trues=new boolean[chmax];
+		for(int i=0; i<chmax; i++)trues[i]=true;
+		GenericDialog gd=new GenericDialog("Concatenate Channels");
+		gd.addMessage("Select two images to concatenate channels");
+		gd.addChoice("Image 1", titles, curImageTitle);
+		gd.addCheckboxGroup(chmax, 1, labels, trues);
+		gd.addChoice("Image 2", titles, (titles[0].contentEquals(curImageTitle))?titles[1]:titles[0]);
+		gd.addCheckboxGroup(chmax, 1, labels, trues);
+		gd.showDialog();
+		if(gd.wasCanceled()) return;
+		ImagePlus imp1=WindowManager.getImage(gd.getNextChoice());
+		boolean[] keepChs1=new boolean[imp1.getNChannels()];
+		for(int i=0; i<chmax; i++) {
+			if(i<imp1.getNChannels()) keepChs1[i]=gd.getNextBoolean();
+		}
+		ImagePlus imp2=WindowManager.getImage(gd.getNextChoice());
+		boolean[] keepChs2=new boolean[imp2.getNChannels()];
+		for(int i=0; i<chmax; i++) {
+			if(i<imp2.getNChannels()) keepChs2[i]=gd.getNextBoolean();
+		}
+		concatenateChannels(imp1, imp2, keepChs1, keepChs2);
+	}
+
+	static public void concatenateChannels(ImagePlus imp1, ImagePlus imp2) {
+		concatenateChannels(imp1, imp2, null, null);
+	}
+
+	static public ImagePlus concatenateChannels(ImagePlus imp1, ImagePlus imp2, boolean[] keepChs1, boolean[] keepChs2) {
+		if(imp1==null || imp2==null) {IJ.error("Need two images"); return null;}
+		if(imp1.getNFrames()!=imp2.getNFrames() || imp1.getNSlices()!=imp2.getNSlices()) {IJ.error("Images must have same number of frames and slices"); return null;}
+		int chs1=imp1.getNChannels(), chs2=imp2.getNChannels(), sls=imp1.getNSlices(), frms=imp1.getNFrames();
+		if(keepChs1==null){
+			keepChs1=new boolean[chs1];
+			for(int i=0; i<chs1; i++)keepChs1[i]=true;
+		}
+		if(keepChs2==null){
+			keepChs2=new boolean[chs2];
+			for(int i=0; i<chs2; i++)keepChs2[i]=true;
+		}
+		if(keepChs1.length!=chs1 || keepChs2.length!=chs2) {IJ.error("keepChs arrays must match number of channels in images"); return null;}
+		ImageStack imst1=imp1.getStack(), imst2=imp2.getStack();
+		ImageStack outst=new ImageStack(imp1.getWidth(), imp1.getHeight());
+		for(int fr=0; fr<frms; fr++) {
+			for(int sl=0; sl<sls; sl++) {
+				for(int ch=0; ch<chs1; ch++) {
+					if(keepChs1[ch]) {
+						outst.addSlice(imst1.getSliceLabel(fr*sls*chs1+sl*chs1+ch+1), imst1.getProcessor(fr*sls*chs1+sl*chs1+ch+1));
+					}
+				}
+				for(int ch=0; ch<chs2; ch++) {
+					if(keepChs2[ch]) {
+						outst.addSlice(imst2.getSliceLabel(fr*sls*chs2+sl*chs2+ch+1), imst2.getProcessor(fr*sls*chs2+sl*chs2+ch+1));
+					}
+				}
+			}
+		}
+		int newChs=0;
+		for(int ch=0; ch<chs1; ch++) {
+			if(keepChs1[ch])newChs++;
+		}
+		for(int ch=0; ch<chs2; ch++) {
+			if(keepChs2[ch])newChs++;
+		}
+		ImagePlus out=new ImagePlus(imp1.getTitle()+"_concat", outst);
+		out.setOpenAsHyperStack(imp1.isHyperStack());
+		out.setDimensions(newChs, sls, frms);
+		out.setCalibration(imp1.getCalibration());
+		CompositeImage out2=new CompositeImage(out);
+		ij.process.LUT[] luts=new ij.process.LUT[newChs];
+		int i=0;
+		for(int ch=0; ch<chs1; ch++) {
+			if(ch<imp1.getLuts().length && keepChs1[ch]) {
+				luts[i]=imp1.getLuts()[ch];
+				i++;
+			}
+		}
+		for(int ch=0; ch<chs2; ch++) {
+			if(ch<imp2.getLuts().length && keepChs2[ch]) {
+				luts[i]=imp2.getLuts()[ch];
+				i++;
+			}
+		}
+		out2.setLuts(luts);
+		if(imp1 instanceof CompositeImage) out2.setMode(((CompositeImage)imp1).getMode());
+		String info1=imp1.getInfoProperty(), info2=imp2.getInfoProperty();
+		String info="Channel concatenation of:\n"+imp1.getTitle()+" and "+imp2.getTitle()+"\n"+info1+"\n"+info2;
+		out2.setProperty("Info",info);
+		out2.show();
+		return out2;
+	}
+
+	static public void CCR2ConcatChs(){
+		int[] imids=WindowManager.getIDList();
+		if(imids==null || imids.length<2) {IJ.error("Need at least two images"); return;}
+		ArrayList<Integer> doneIds=new ArrayList<Integer>();
+		for(int id: imids) {
+			if(doneIds.contains(id))continue;
+			ImagePlus imp=WindowManager.getImage(id);
+			String[] locs=get2pLocation(imp);
+			if(locs==null)continue;
+			int wv1=get2pWaveLength(imp);
+			IJ.log("CCR2Concat: "+imp.getTitle()+"("+wv1+")"+" "+locs[0]+" "+locs[1]);
+			for(int id2: imids) {
+				if(id==id2 || doneIds.contains(id2))continue;
+				ImagePlus imp2=WindowManager.getImage(id2);
+				String[] locs2=get2pLocation(imp2);
+				if(locs2==null || locs2.length<3)continue;
+				int locx1=Math.round(Float.parseFloat(locs[0]));
+				int locx2=Math.round(Float.parseFloat(locs2[0]));
+				int locy1=Math.round(Float.parseFloat(locs[1]));
+				int locy2=Math.round(Float.parseFloat(locs2[1]));
+				if((Math.abs(locx1 - locx2) < 2) && (Math.abs(locy1 - locy2) < 2)) {
+					int wv2=get2pWaveLength(imp2);
+					if(wv1!=wv2){
+						if(wv1<780 && wv2>820) {
+							ImagePlus temp=imp;
+							imp=imp2;
+							imp2=temp;
+						}
+						Roi roi1=imp.getRoi(), roi2=imp2.getRoi();
+						int xShift=0, yShift=0, zShift=0;
+						if(roi1!=null && roi2!=null && roi1.getType()==Roi.POINT && roi2.getType()==Roi.POINT) {
+							java.awt.Polygon poly1=roi1.getPolygon(), poly2=roi2.getPolygon();
+							int xave1=0, yave1=0, xave2=0, yave2=0, z1=0, z2=0;
+							for(int i=0; i<poly1.npoints; i++) {
+								xave1+=poly1.xpoints[i];
+								yave1+=poly1.ypoints[i];
+							}
+							xave1/=poly1.npoints;
+							yave1/=poly1.npoints;
+							for(int i=0; i<poly2.npoints; i++) {
+								xave2+=poly2.xpoints[i];
+								yave2+=poly2.ypoints[i];
+							}
+							xave2/=poly2.npoints;
+							yave2/=poly2.npoints;
+							z1=((PointRoi)roi1).getPointPosition(0);
+							while(z1>(imp.getNSlices()*imp.getNChannels())) {
+								z1-=imp.getNSlices()*imp.getNChannels();
+							}
+							z1=(int)Math.floor(z1/imp.getNChannels())+1;
+							z2=((PointRoi)roi2).getPointPosition(0);
+							while(z2>(imp2.getNSlices()*imp2.getNChannels())) {
+								z2-=imp2.getNSlices()*imp2.getNChannels();
+							}
+							z2=(int)Math.floor(z2/imp2.getNChannels())+1;
+							xShift=xave1-xave2;
+							yShift=yave1-yave2;
+							zShift=z1-z2;
+							IJ.log("Imp1: x"+xave1+" y"+yave1+" z"+z1);
+							IJ.log("Imp2: x"+xave2+" y"+yave2+" z"+z2);
+							IJ.log("Shift: x"+xShift+" y"+yShift+" z"+zShift);
+						}
+						if(xShift!=0 || yShift!=0 || zShift!=0) {
+							IJ.log("CCR2Concat: "+imp.getTitle()+"("+wv1+")"+" "+locs[0]+" "+locs[1]+" matched "+imp2.getTitle()+"("+wv2+")"+" "+locs2[0]+" "+locs2[1]+" with shift "+xShift+","+yShift+","+zShift);
+						}else {
+							IJ.log("CCR2Concat: "+imp.getTitle()+"("+wv1+")"+" "+locs[0]+" "+locs[1]+" matched "+imp2.getTitle()+"("+wv2+")"+" "+locs2[0]+" "+locs2[1]);
+						}
+						ImagePlus out=concatenateChannels(imp, imp2, null, new boolean[] {false, false, true});
+						if(xShift!=0 || yShift!=0 || zShift!=0) {
+							XYZShiftChannel(out, 4, xShift, yShift, zShift, true);
+						}
+						doneIds.add(id);
+						doneIds.add(id2);
+						imp.close();
+						imp2.close();
+					}
+				}
+			}
+
+		}
+	}
+
+	static public String[] get2pLocation(ImagePlus imp) {
+		String info=imp.getInfoProperty();
+		if(info==null || !info.contains("Location"))return null;
+		String[] infolines=info.split("\n");
+		int loclinei=-1;
+		for(int i=0; i<infolines.length; i++) {
+			if(infolines[i].contains("Location")) {
+				loclinei=i;
+				break;
+			}
+		}
+		if(loclinei==-1)return null;
+		String locline=infolines[loclinei];
+		String loc=locline.split(":")[1].trim();
+		String[] parts=loc.split("\\s+");
+		if(parts.length<3) return null;
+		String[] temp=new String[3];
+		for(int i=0; i<3; i++) {
+			temp[i]=parts[i];
+		}
+		return temp;
+	}
+
+	static public int get2pWaveLength(ImagePlus imp){
+		String info=imp.getInfoProperty();
+		if(info==null || !info.contains("Wv:"))return -1;
+		String[] infolines=info.split("\n");
+		int wvlinei=-1;
+		for(int i=0; i<infolines.length; i++) {
+			if(infolines[i].contains("Wv:")) {
+				wvlinei=i;
+				break;
+			}
+		}
+		if(wvlinei==-1)return -1;
+		String wvline=infolines[wvlinei];
+		String wv=wvline.split("Wv:")[1].trim();
+		return Integer.parseInt(wv);
+	}
+
+	static public void XYZShiftChannel(){
+		ImagePlus imp=WindowManager.getCurrentImage();
+		if(imp==null) {IJ.noImage(); return;}
+		Roi roi=imp.getRoi();
+		//boolean manual=false;
+		int xShift=0, yShift=0, zShift=0;
+		if(roi!=null){
+			java.awt.Polygon poly=roi.getPolygon();
+			if(poly.npoints==2) {
+				int[] xs=poly.xpoints, ys=poly.ypoints;
+				xShift=xs[1]-xs[0];
+				yShift=ys[1]-ys[0];
+			}
+			//manual=true;
+		}
+		int chs=imp.getNChannels(), frms=imp.getNFrames(), chToShift=imp.getChannel();
+		//if(chs<2) {IJ.error("Need at least 2 channels"); return;}
+		GenericDialog gd=new GenericDialog("Shift single channel in xy");
+		gd.addMessage("Shift channel in xy to align to other channels");
+		if(frms>1)gd.addCheckbox("Shift all frames?", true);
+		String[] chchoices=new String[chs];
+		for(int i=0; i<chs; i++) {
+			chchoices[i]="Channel "+(i+1);
+		}
+		gd.addChoice("Channel to shift:", chchoices, chchoices[chToShift-1]);
+		//gd.addCheckbox("manual enter shifts in pixels", manual);
+		gd.addNumericField("X shift (px)", xShift, 0);
+		gd.addNumericField("Y shift (px)", yShift, 0);
+		gd.addNumericField("Z shift (px)", zShift, 0);
+		gd.showDialog();
+		if(gd.wasCanceled()) return;
+		chToShift=gd.getNextChoiceIndex()+1;
+		boolean shiftAll=frms>1?gd.getNextBoolean():false;
+		//manual=gd.getNextBoolean();
+		xShift=(int)gd.getNextNumber();
+		yShift=(int)gd.getNextNumber();
+		zShift=(int)gd.getNextNumber();
+		//if(!manual) {
+		//	IJ.error("Not coded yet");
+		//	return;
+		//}
+		XYZShiftChannel(imp, chToShift, xShift, yShift, zShift, shiftAll);
+	}
+
+	public static void XYZShiftChannel(ImagePlus imp, int chToShift, int xShift, int yShift, int zShift, boolean shiftAll) {
+		ImageStack imst=imp.getStack();
+		int chs=imp.getNChannels(), sls=imp.getNSlices(), frms=imp.getNFrames();
+		if(chToShift<1 || chToShift>chs) {IJ.error("Invalid channel to shift"); return;}
+		int stfr=0, endfr=frms;
+		if(shiftAll) {
+			endfr=imp.getT();
+			stfr=endfr-1;
+			if(stfr<0)stfr=0;
+		}
+		int nfrms=endfr-stfr;
+		IJ.log("Shifting channel "+chToShift+" by "+xShift+"px in x, "+yShift+"px in y, and "+zShift+"px in z across "+nfrms+" frame(s)");
+		int sldir=1, slst=0, slend=sls;
+		if(zShift>0) {
+			sldir=-1;
+			slst=sls-1;
+			slend=-1;
+		}
+		for(int fr=stfr; fr<endfr; fr++) {
+			for(int sl=slst; sl!=slend; sl+=sldir) {
+				int targetSlice=sl-zShift;
+				if(targetSlice<0 || targetSlice>=sls){
+					imst.setProcessor(imst.getProcessor(imp.getStackIndex(chToShift, sl+1, fr+1)).createProcessor(imst.getWidth(), imst.getHeight()), imp.getStackIndex(chToShift, sl+1, fr+1));
+					continue;
+				}
+				ImageProcessor ip=imst.getProcessor(imp.getStackIndex(chToShift, sl+1, fr+1));
+				ImageProcessor targetip=null;
+				if(targetSlice==sl) targetip=ip.duplicate();
+				else{
+					targetip=imst.getProcessor(imp.getStackIndex(chToShift, targetSlice+1, fr+1));
+				}
+				for(int y=0; y<ip.getHeight(); y++) {
+					int yc=y+yShift;
+					for(int x=0; x<ip.getWidth(); x++) {
+						int xc=x+xShift;
+						if(xc<0 || xc>=ip.getWidth() || yc<0 || yc>=ip.getHeight()) {
+							int xs=xc<0?(ip.getWidth()+xc):xc;
+							if(xs>=ip.getWidth())xs=xs-ip.getWidth();
+							int ys=yc<0?(ip.getHeight()+yc):yc;
+							if(ys>=ip.getHeight())ys=ys-ip.getHeight();
+							ip.set(xs,ys,0);
+						} else
+							ip.set(xc,yc,targetip.get(x,y));
+					}
+				}
+				IJ.showProgress((double)(fr*sls+sl+1)/(double)(nfrms*sls));
+			}
+		}
+		String info=imp.getInfoProperty();
+		info=(info!=null?info+"\n":"")+"Shifted channel "+chToShift+" by "+xShift+"x "+yShift+"y "+zShift+"z";
+		imp.setProperty("Info", info);
+		imp.updateAndDraw();
+	}
+
+	public static void StackCombiner() {
+		ImagePlus imp1=WindowManager.getCurrentImage();
+		if(imp1==null) {IJ.noImage(); return;}
+		String[] titles=WindowManager.getImageTitles();
+		if(titles==null || titles.length<2) {IJ.error("Need at least two images"); return;}
+		String curImageTitle=imp1.getTitle();
+		String[] blitters=new String[] {"COPY_ZERO_TRANSPARENT", "COPY", "AVERAGE", "MIN", "MAX", "OR"};
+		int[] blitterVals=new int[] {Blitter.COPY_ZERO_TRANSPARENT, Blitter.COPY, Blitter.AVERAGE, Blitter.MIN, Blitter.MAX, Blitter.OR};
+		GenericDialog gd=new GenericDialog("Combine Stacks");
+		gd.addMessage("Select two images with point ROIs to combine into a single stack");
+		gd.addChoice("Image 1", titles, curImageTitle);
+		gd.addChoice("Image 2", titles, (titles[0].contentEquals(curImageTitle))?titles[1]:titles[0]);
+		gd.addChoice("Blitter", blitters, blitters[0]);
+		gd.showDialog();
+		if(gd.wasCanceled()) return;
+		imp1=WindowManager.getImage(gd.getNextChoice());
+		ImagePlus imp2=WindowManager.getImage(gd.getNextChoice());
+		StackCombiner(imp1, imp2, blitterVals[gd.getNextChoiceIndex()]);
+	}
+
+	public static void StackCombiner(ImagePlus imp1, ImagePlus imp2, int blitter){
+		if(imp1==null || imp2==null) {IJ.error("Need two images"); return;}
+		int chs1=imp1.getNChannels(), chs2=imp2.getNChannels(), sls1=imp1.getNSlices(), sls2=imp2.getNSlices(), frms1=imp1.getNFrames(), frms2=imp2.getNFrames();
+		int sl1=imp1.getSlice(), sl2=imp2.getSlice();
+		if(frms1!=frms2 || chs1!=chs2) {IJ.error("Images must have same number of frames and channels"); return;}
+		Roi roi1=imp1.getRoi(), roi2=imp2.getRoi();
+		if(roi1==null || roi2==null || roi1.getType()!=Roi.POINT || roi2.getType()!=Roi.POINT) {IJ.error("Both images must have point ROIs"); return;}
+		ImageStack imst1=imp1.getStack(), imst2=imp2.getStack();
+		int x1=roi1.getPolygon().xpoints[0], y1=roi1.getPolygon().ypoints[0], x2=roi2.getPolygon().xpoints[0], y2=roi2.getPolygon().ypoints[0];
+		int xleftmax=Math.max(x1, x2), xrightmax=Math.max(imp1.getWidth()-x1, imp2.getWidth()-x2), ytopmax=Math.max(y1, y2), ybottommax=Math.max(imp1.getHeight()-y1, imp2.getHeight()-y2);
+		ImageStack imstout=new ImageStack(xleftmax+xrightmax, ytopmax+ybottommax);
+		int zup=Math.max(sl1, sl2), zdown=Math.max(sls1-sl1, sls2-sl2), zshift1=sl1-zup, zshift2=sl2-zup;
+		for(int fr=0; fr<frms1; fr++) {
+			for(int sl=0; sl<(zup+zdown); sl++){
+				for(int ch=0; ch<chs1; ch++) {
+					ImageProcessor ip=imp1.getProcessor().createProcessor(xleftmax+xrightmax, ytopmax+ybottommax);
+					if((sl+zshift1)>=0 && (sl+zshift1)<sls1) {
+						ImageProcessor ip1=imst1.getProcessor(imp1.getStackIndex(ch+1, sl+zshift1+1, fr+1));
+						ip.copyBits(ip1, xleftmax-x1, ytopmax-y1, Blitter.COPY);
+					}
+					if((sl+zshift2)>=0 && (sl+zshift2)<sls2) {
+						ImageProcessor ip2=imst2.getProcessor(imp2.getStackIndex(ch+1, sl+zshift2+1, fr+1));
+						ip.copyBits(ip2, xleftmax-x2, ytopmax-y2, blitter);
+					}
+					imstout.addSlice("Fr"+(fr+1)+"_Sl"+(sl+1)+"_Ch"+(ch+1), ip);
+				}
+				IJ.showProgress((double)(fr*(zup+zdown)+sl+1)/(double)(frms1*(zup+zdown)));
+			}
+		}
+		ImagePlus out=new ImagePlus(imp1.getTitle()+"_"+imp2.getTitle()+"_Combined", imstout);
+		out.setOpenAsHyperStack(imp1.isHyperStack());
+		out.setDimensions(chs1, zup+zdown, frms1);
+		out.setCalibration(imp1.getCalibration());
+		if(imp1 instanceof CompositeImage) {
+			CompositeImage outc=new CompositeImage(out);
+			outc.copyLuts(imp1);
+			outc.setMode(((CompositeImage)imp1).getMode());
+			out=outc;
+		}
+		out.show();
+
+	}
+	
 }
