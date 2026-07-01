@@ -2171,7 +2171,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			mi.addActionListener(new ActionListener() {
 				@Override
 				public void actionPerformed(ActionEvent e) {
+					if(soverlay!=null)soverlay.remove(ajtctcpimpAllroi);
 					ajtcpcpDiffOverlay();
+					if(soverlay!=null)soverlay.add(ajtctcpimpAllroi);
+					simp.updateAndDraw();
 				}
 			});
 			options.add(mi);

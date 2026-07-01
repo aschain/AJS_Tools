@@ -1339,7 +1339,7 @@ public class AJ_Misc_Plugins implements PlugIn {
 		int sl1=imp1.getSlice(), sl2=imp2.getSlice();
 		if(frms1!=frms2 || chs1!=chs2) {IJ.error("Images must have same number of frames and channels"); return;}
 		Roi roi1=imp1.getRoi(), roi2=imp2.getRoi();
-		if(roi1==null || roi2==null || roi1.getType()!=Roi.POINT || roi2.getType()!=Roi.POINT) {IJ.error("Both images must have point ROIs"); return;}
+		if(roi1==null || roi2==null || roi1.getType()!=Roi.POINT || roi2.getType()!=Roi.POINT) {IJ.error("Both images must have point ROIs marking a common structure"); return;}
 		ImageStack imst1=imp1.getStack(), imst2=imp2.getStack();
 		int x1=roi1.getPolygon().xpoints[0], y1=roi1.getPolygon().ypoints[0], x2=roi2.getPolygon().xpoints[0], y2=roi2.getPolygon().ypoints[0];
 		int xleftmax=Math.max(x1, x2), xrightmax=Math.max(imp1.getWidth()-x1, imp2.getWidth()-x2), ytopmax=Math.max(y1, y2), ybottommax=Math.max(imp1.getHeight()-y1, imp2.getHeight()-y2);
