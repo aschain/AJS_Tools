@@ -131,7 +131,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	private static LUT LUT_GLASBEY_INV=new LUT(ij.plugin.LutLoader.getLut("glasbey inverted"),0,255);
 	private final Color DEF_ROI_COLOR=Roi.getColor();
 	private String spath="";
-	private boolean editing=false, reconfirming=false, skipconfirmation=false;
+	private boolean editing=false, reconfirming=false, skipconfirmation=false, importingFromAllRois=false;
+	private ArrayList<Roi> allRois=null;
 	private int greench=2, redch=3;
 	private Roi axonRoi=null, duraBVRoi=null, piaBVRoi=null;
 	private boolean showAllRois=true;
@@ -147,6 +148,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		}
 		if(arg.contentEquals("ptReslice")){
 			ptReslice();
+			return;
+		}
+		if(arg.contentEquals("masksToRois")){
+			masksToRois();
 			return;
 		}
 		if(arg.contentEquals("fullz"))fullZ=true;
@@ -201,6 +206,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				if(ync.cancelPressed()) break;
 				if(ync.yesPressed()) {
 					ajtctcpimp=WindowManager.getImage(t);
+					break;
 				}
 				
 			}
@@ -265,6 +271,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 						if(ync.cancelPressed()) break;
 						if(ync.yesPressed()) {
 							ajtctcpimp=IJ.openImage(f.getAbsolutePath());
+							ajtctcpimp.show();
+							break;
 						}
 					}
 				}
@@ -367,48 +375,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		}
 	}
 
-	public void TCT(ImagePlus imp) {
-		if (imp==null) {IJ.log("noImage"); return;}
-		ImagePlus[] imps=getSourceAndTarget();
-		if(imps==null)return;
-		simp=imps[0]; timp=imps[1]; ajtctcpimp=imps[2];
-		if(!setup())return;
-
-		//Start Results Window
-		results=new TctTextWindow(basetitle);
-		if(results.rtw==null){IJ.error("Failed to make Results Window"); return;}
-		if("Unlabeled".equals(cellLabel)) askCellLabel();
-		else timp.setProperty("Info", results.getText(true));
-
-		//Start TCT Panel
-		tctpanel=new TCTPanel();
-		tctpanel.addWindowListener(new WindowAdapter(){  
-			public void windowClosing(WindowEvent e) {  
-				done=true;
-				tctpanel.dispose();  
-			}  
-		});  
-		tctpanel.setVisible(true);
-
-		//Initialize loop variables
-		int sl=simp.getSlice(), fr=simp.getFrame();
-		int frms=simp.getNFrames();
-		int prevsl=sl, prevfr=fr;
-		int prevcelln=-1;
-		curX=-1; curY=-1;
-		int xprev=curX, yprev=curY;
-		String frmsleft="";
-		boolean ignoreCellComplete=false;
-
-		Overlay tov1=timp.getOverlay();
-		boolean importFromOverlay=false;
-		if(tov1!=null && tov1.size()>0) {
-			YesNoCancelDialog ync=new YesNoCancelDialog(null, "AJTCT-Overlay-Import", "Import from AJTCT Overlay?");
-			if(ync.yesPressed()) importFromOverlay=true;
-		}
-		double defaultThresh=0;
-		if(simp.getProcessor().getMinThreshold()>0)defaultThresh=simp.getProcessor().getMinThreshold();
-
+	private void setupAJTCTcp(){
 		if(ajtctcpimp!=null && ajtctcpimp.isVisible()) {
 			ImageCanvas ajc=ajtctcpimp.getCanvas();
 			ajc.disablePopupMenu(true);
@@ -452,7 +419,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				public void mouseEntered(MouseEvent e) {
 					if(ajtctcpimp==null || !ajtctcpimp.isVisible() || (ajtctcpimp.getT() != simp.getT()) )return;
 					accepted=false;
-					if(curWand[simp.getFrame()-1]!=null && curWand[simp.getFrame()-1].roi!=null)
+					if(curWand!=null &&curWand[simp.getFrame()-1]!=null && curWand[simp.getFrame()-1].roi!=null)
 						temproi=curWand[simp.getFrame()-1].getRoi();
 					else temproi=simp.getRoi();
 				}
@@ -500,47 +467,74 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			ajc.addMouseListener(ma);
 			ajc.addMouseMotionListener(ma);
 		}
+	}
+
+	public void TCT(ImagePlus imp) {
+		if (imp==null) {IJ.log("noImage"); return;}
+		ImagePlus[] imps=getSourceAndTarget();
+		if(imps==null)return;
+		simp=imps[0]; timp=imps[1]; ajtctcpimp=imps[2];
+		if(!setup())return;
+
+		//Start Results Window
+		results=new TctTextWindow(basetitle);
+		if(results.rtw==null){IJ.error("Failed to make Results Window"); return;}
+		if("Unlabeled".equals(cellLabel)) askCellLabel();
+		else timp.setProperty("Info", results.getText(true));
+
+		//Start TCT Panel
+		tctpanel=new TCTPanel();
+		tctpanel.addWindowListener(new WindowAdapter(){  
+			public void windowClosing(WindowEvent e) {  
+				done=true;
+				tctpanel.dispose();  
+			}  
+		});  
+		tctpanel.setVisible(true);
+
+		//Initialize loop variables
+		int sl=simp.getSlice(), fr=simp.getFrame();
+		int frms=simp.getNFrames();
+		int prevsl=sl, prevfr=fr;
+		int prevcelln=-1;
+		curX=-1; curY=-1;
+		int xprev=curX, yprev=curY;
+		String frmsleft="";
+		boolean ignoreCellComplete=false;
+
+		Overlay tov1=timp.getOverlay();
+		boolean importFromOverlay=false;
+		if(tov1!=null && tov1.size()>0) {
+			YesNoCancelDialog ync=new YesNoCancelDialog(null, "AJTCT-Overlay-Import", "Import from AJTCT Overlay?");
+			if(ync.yesPressed()) importFromOverlay=true;
+		}
+		double defaultThresh=0;
+		if(simp.getProcessor().getMinThreshold()>0)defaultThresh=simp.getProcessor().getMinThreshold();
+
+		setupAJTCTcp();
+		int importFromAllRoisLine=0;
 
 		//-------loop-------------
 		//main loop
 		while(!done){
-
-			//start edit if editRoi
-			if(editRoi)editRoi();
-
 			//reset if new cell
-			if(celln!=prevcelln){
+			if(celln!=prevcelln || editRoi || importingFromAllRois) {
 				frmsleft=""; for(int i=0;i<frms;i++) frmsleft+=(i+1)+" ";
 				tctpanel.setTextLine(TctLines.FRAMESLEFT, "Frames left: "+frmsleft);
 				xys.clear();
 				pointIndex=0;
 				tctpanel.resetWP();
+
 				for(int i=0;i<MAX_POINTS;i++) {
 					postFirstAccept[i]=false;
 				}
-				if(editing) {
-					if(curWand[0]!=null && curWand[0].wandPoints!=null && curWand[0].wandPoints.size()>0) {
-						curX=curWand[0].wandPoints.get(0).getX();
-						curY=curWand[0].wandPoints.get(0).getY();
-						xys.add(new WandPoint(curWand[0].wandPoints.get(0).point, curWand[0].wandPoints.get(0).thresh, false));
-						defaultThresh=curWand[0].wandPoints.get(0).thresh;
-						simp.getProcessor().setThreshold(defaultThresh, (double) 65535, MYLUT);
-					}
-					for(int i=1;i<frms;i++) {
-						if(curWand[i]!=null)curWand[i].accept();
-					}
-					if(!reconfirming)ignoreCellComplete=true;
-				}else {
-					curX=-1; curY=-1;
-					curWand=new AutoWandRoi[frms];
-					tctpanel.setTextLine(TctLines.CURRENTCELL, "Working on "+cellLabel+" Cell: "+celln);
-					xys.add(new WandPoint(null, 0, false));
-				}
-				xprev=curX; yprev=curY;
-				//lastfr=-1;
-				prevsl=simp.getSlice(); prevfr=simp.getFrame();
-				prevcelln=celln;
-				soverlay.clear();
+				
+				curX=-1; curY=-1;
+				curWand=new AutoWandRoi[frms];
+				tctpanel.setTextLine(TctLines.CURRENTCELL, "Working on "+cellLabel+" Cell: "+celln);
+				xys.add(new WandPoint(null, 0, false));
+
+				//import from overlay of a previously saved AJTCT image
 				if(importFromOverlay) {
 					timp.setOverlay(new Overlay());
 					for(int i=0;i<tov1.size();i++) {
@@ -553,7 +547,86 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					}
 					importFromOverlay=false;
 				}
+				
+				//if importing from all rois, set up the curWand array
+				if(importingFromAllRois){
+					if(allRois!=null && allRois.size()>0){
+						Roi curRoi=allRois.get(0);
+						allRois.remove(0);
+						simp.setZ(getDuraCellZ(simp, curRoi));
+						int min=65535, roiNum=0;
+						Point[] pts=curRoi.getContainedPoints();
+						ImageProcessor ip=simp.getProcessor();
+						ImageProcessor tip=timp.getStack().getProcessor(timp.getStackIndex(1, simp.getZ(), simp.getFrame()));
+						for(Point p : pts){
+							int val=ip.get(p.x, p.y);
+							if(val>0 && val<min)min=val;
+							if(roiNum==0){
+								int tval=tip.get(p.x, p.y);
+								if(tval!=0){
+									roiNum=tval;
+								}
+							}
+						}
+						if(ajtctcpimp!=null && ajtctcpimp.isVisible()){
+							String addString="ImportFromAllRois last roi: "+roiNum;
+							String info=ajtctcpimp.getInfoProperty();
+							if(info.endsWith("\n"))info=info.substring(0, info.length()-1);
+							if(!info.contains("ImportFromAllRois")){
+								info+="\n"+addString;
+							}else{
+								String[] infon=info.split("\n");
+								if(importFromAllRoisLine==0){
+									for (int i=0;i<infon.length-1;i++){
+										if(infon[i].contains("ImportFromAllRois")){
+											importFromAllRoisLine=i;
+											break;
+										}
+									}
+								}
+								infon[importFromAllRoisLine]=addString;
+								info=String.join("\n", infon);
+							}
+							ajtctcpimp.setProperty("Info", info);
+							IJ.saveAsTiff(ajtctcpimp, ajtctcpimp.getOriginalFileInfo().directory+ajtctcpimp.getTitle());
+						}
+						Rectangle r=curRoi.getBounds();
+						curX=r.x+r.width/2; curY=r.y+r.height/2;
+						xys.clear();
+						Point p=new Point(curX, curY);
+						xys.add(new WandPoint(p, min, false));
+						defaultThresh=min;
+						curWand[0]=new AutoWandRoi(curRoi, (double)min, p, simp.getC(), simp.getZ(), 1);
+						curWand[0].showBoth();
+						setSrcRectAtPoint(p);
+					}else{
+						importingFromAllRois=false;
+						IJ.showMessage("Importing ROIs complete");
+					}
+				}
+				
+				//start edit if editRoi
+				if(editRoi)editRoi();
+				if(reconfirming) editRoi(celln);
+				if(editing){
+					if(curWand[0]!=null && curWand[0].wandPoints!=null && curWand[0].wandPoints.size()>0) {
+						curX=curWand[0].wandPoints.get(0).getX();
+						curY=curWand[0].wandPoints.get(0).getY();
+						xys.clear();
+						xys.add(new WandPoint(curWand[0].wandPoints.get(0).point, curWand[0].wandPoints.get(0).thresh, false));
+						defaultThresh=curWand[0].wandPoints.get(0).thresh;
+					}
+					for(int i=1;i<frms;i++) {
+						if(curWand[i]!=null)curWand[i].accept();
+					}
+					if(!reconfirming)ignoreCellComplete=true;
+				}
 
+				//lastfr=-1;
+				xprev=curX; yprev=curY;
+				prevsl=simp.getSlice(); prevfr=simp.getFrame();
+				prevcelln=celln;
+				soverlay.clear();
 				if(showAllRois){
 					showAllRois();
 				}else if(showAllRoi!=null){
@@ -561,6 +634,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					showAllRoi=null;
 				}
 				simp.setOverlay(soverlay);
+				simp.getProcessor().setThreshold(defaultThresh, (double) 65535, MYLUT);
 				simp.updateAndDraw();
 				threshChanged.set(false);
 			}
@@ -645,7 +719,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				if(addDirectRoi)addDirectRoi();
 
 				//if edit, stop this loop (by accepting the roi)
-				if(editRoi)acceptedROI.set(true);
+				if(editRoi) {
+					curWand[fr-1]=null;
+					break;
+				}
 
 				//recalculate Axons and BV distances
 				if(recalcABV.get()>0) {
@@ -689,18 +766,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				//if(DEBUG)IJ.log("\\Update:"+System.nanoTime()/1000000+"  xy:"+xy.x+" "+xy.y+" aa"+autoAccept+" probable"+(curWand[fr-1]==null?"NA":""+curWand[fr-1].probable)+" rc:"+buttonpress[2]+" gb:"+goback);
 				if(curX!=-1 && curY!=-1 && autoAccept && curWand[fr-1].probable && ((spacepress.get() && !buttonpress[0]) || buttonpress[2])){acceptedROI.set(true);}
 				//if((auto||!firsthit) && x!=-1 && y!=-1 && !firsttime)acceptedROI=true; else IJ.wait(200);
-				if(acceptedROI.get() && checkZmax && simp.getRoi()!=null && curWand[fr-1]!=null && !curWand[fr-1].wasClose) {
-					int zmax=getClosestMaxZ(simp, simp.getRoi());
-					if(zmax>0 && zmax!=sl && Math.abs(zmax-sl)<=5) {
-						YesNoCancelDialog ync=new YesNoCancelDialog(null, "Max Z-plane Check", "A close z-maximum was found: "+zmax+". Go to this z?");
-						if(ync.cancelPressed()) {
-							acceptedROI.set(false);
-						}else if(ync.yesPressed()) {
-							acceptedROI.set(false);
-							simp.setPosition(simp.getChannel(), zmax, simp.getFrame());
-						}
-					}
-				}
+				
+				//go to closest zmax if z key is pressed
 				if(goToZmax.get()) {
 					goToZmax.set(false);
 					if(simp.getRoi()!=null) {
@@ -710,23 +777,53 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 						}
 					}
 				}
+
+				if(acceptedROI.get() && checkZmax && simp.getRoi()!=null && curWand[fr-1]!=null && !curWand[fr-1].wasClose) {
+					if(checkZmax && !curWand[fr-1].wasClose) {
+						int zmax=getClosestMaxZ(simp, simp.getRoi());
+						if(zmax>0 && zmax!=sl && Math.abs(zmax-sl)<=5) {
+							YesNoCancelDialog ync=new YesNoCancelDialog(null, "Max Z-plane Check", "A close z-maximum was found: "+zmax+". Go to this z?");
+							if(ync.cancelPressed()) {
+								acceptedROI.set(false);
+							}else if(ync.yesPressed()) {
+								acceptedROI.set(false);
+								simp.setPosition(simp.getChannel(), zmax, simp.getFrame());
+							}
+						}
+					}
+					if(!postFirstAccept[0] && curWand[fr-1].roi!=null) {
+						ImageProcessor tip=timp.getStack().getProcessor(timp.getStackIndex(1,labelsl,fr));
+						Point[] pts=curWand[fr-1].roi.getContainedPoints();
+						int max=0;
+						for(Point p : pts) {
+							int val=tip.get(p.x, p.y);
+							if(val>max)max=val;
+						}
+						if(max>0) {
+							YesNoCancelDialog ync=new YesNoCancelDialog(null, "Overlap Check", "Warning-- Current selection overlaps with another cell (Cell "+max+"), continue?");
+							if(!ync.yesPressed()) {
+								acceptedROI.set(false);
+							}
+						}
+					}
+				}
 			} //end loop per frame/accepted
 
 			if(updatedLabel) {prevcelln=celln; updatedLabel=false;}
 
-			if(curWand[fr-1]==null){
+			if(curWand[fr-1]==null || simp.getRoi()==null) {
 				IJ.log("No selection");
+				if(importingFromAllRois){
+					if(buttonpress[1]){
+						prevcelln--;
+					} else {
+						YesNoCancelDialog ync=new YesNoCancelDialog(null, "Importing from AllRois", "No selection found. Continue to next ROI?");
+						if(ync.yesPressed()) prevcelln--;
+					}
+				}
 			}else if(!gocellcomplete){
 				//curWand[fr-1].setRoi(simp.getRoi());
 				curWand[fr-1].accept();
-				if(!postFirstAccept[0]) {
-					ImageProcessor tip=timp.getStack().getProcessor(timp.getStackIndex(1,labelsl,fr));
-					tip.setRoi(curWand[fr-1].troi);
-					ImageStatistics im=ImageStatistics.getStatistics(tip);
-					if(im.max>0) {
-						IJ.showMessage("Warning-- Current selection overlaps with another cell (Cell"+im.max+")");
-					}
-				}
 				postFirstAccept[pointIndex]=true;
 				//updateCurWands(false, fr, curWand[fr-1]);
 			}
@@ -763,7 +860,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					oktogo=gd.wasOKed();
 					if(!oktogo)ignoreCellComplete=true;
 				}
-				spacepress.set(false); buttonpress[0]=false; buttonpress[1]=false; buttonpress[2]=false;
+				spacepress.set(false); buttonpress[0]=false; buttonpress[2]=false; buttonpress[1]=false;
 				if (oktogo){
 					timp.setColor(Color.white);
 					for(int i=0;i<frms;i++) {
@@ -794,11 +891,6 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					timp.updateAndRepaintWindow();
 					simp.deleteRoi();
 					timp.deleteRoi();
-					if(celln==255 && !editing && timp.getBitDepth()==8) {
-						IJ.showMessage("Converting AJTCT to 16-bit image because > 255 cells");
-						(new StackConverter(timp)).convertToGray16();
-						timp.setProperty("Info", results.getText(true));
-					}
 					if(plotWindow!=null) {
 						if(plotWindow.isClosed()) {plotWindow=null;}
 						else {
@@ -832,7 +924,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 							reconfirming=false;
 							skipconfirmation=false;
 							IJ.showMessage("Finished reconfirming all cells for label: "+cellLabel);
-						}else editRoi=true;
+						}
 					}
 					fr=0;
 				}
@@ -1307,6 +1399,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 								for(int x=0;x<timp.getWidth();x++)for(int y=0;y<timp.getHeight();y++)val=Math.max(val, ip.get(x,y));
 							}
 							String label=timp.getStack().getSliceLabel(timp.getStackIndex(1, sl+1, 1));
+							if(label!=null && !label.trim().isEmpty()) {label=label.trim().split("\n")[0];}
+							if(label==null || label.trim().isEmpty() || label.contentEquals(timp.getTitle()))label=((sl+1)==1)?"Dura":"Pia";
 							if(label!=null && !label.trim().isEmpty()) {
 								cellLabels.add(label);
 								cellLabel=label;
@@ -1314,23 +1408,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 									curWand=new AutoWandRoi[frms];
 									for(int fr=0;fr<frms;fr++) {
 										Roi roi=getDrawnRoi(label,celln,fr+1);
-										String output="";
-										if(roi!=null) {
-											roi.setPosition(0, 0, 0);
-											curWand[fr]=new AutoWandRoi(roi, 0.0, simp.getC(), simp.getZ(), fr+1);
-											curWand[fr].accept(false, roin++);
-											output=curWand[fr].getOutputString();
-										}else {
-											HashMap<HEADINGS, Object> emptyvals=new HashMap<HEADINGS, Object>();
-											emptyvals.put(HEADINGS.LABEL, cellLabel);
-											emptyvals.put(HEADINGS.ROI, 0);
-											emptyvals.put(HEADINGS.CELL, celln);
-											emptyvals.put(HEADINGS.FRAME, (fr+1));
-											emptyvals.put(HEADINGS.THRESH, -1);
-											emptyvals.put(HEADINGS.TIME, times[fr]);
-											output=buildLine(emptyvals);
-										}
-										rtw.getTextPanel().append(output);
+										appendLineFromRoi(roi, fr+1, false, true);
 									}
 								}
 								
@@ -1370,6 +1448,34 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				IJ.log("Using open window, roin: "+roin+" celln: "+celln+" Label: "+cellLabel);
 			}
 		}
+
+		
+
+	private void appendLineFromRoi(Roi roi, int frame, boolean draw, boolean checkZ){
+		int fr=frame-1;
+		if(roi!=null) {
+			int z=roi.getZPosition();
+			roi.setPosition(0, 0, 0);
+			if(z==0){
+				z=getDuraCellZ(simp, roi);
+				if(z==simp.getNSlices())z=simp.getZ();
+			}
+			if(z>simp.getNSlices() || z<1)z=simp.getZ();
+			curWand[fr]=new AutoWandRoi(roi, 0.0, simp.getC(), z, fr+1);
+			curWand[fr].accept(draw, roin++);
+			results.appendLine(curWand[fr].output);
+			curWand[fr].draw();
+		}else {
+			HashMap<HEADINGS, Object> emptyvals=new HashMap<HEADINGS, Object>();
+			emptyvals.put(HEADINGS.LABEL, cellLabel);
+			emptyvals.put(HEADINGS.ROI, 0);
+			emptyvals.put(HEADINGS.CELL, celln);
+			emptyvals.put(HEADINGS.FRAME, (fr+1));
+			emptyvals.put(HEADINGS.THRESH, -1);
+			emptyvals.put(HEADINGS.TIME, times[fr]);
+			results.appendLine(emptyvals);
+		}
+	}
 
 		public void addPostData(int postDataType) {
 			addPostData(postDataType, false);
@@ -1749,7 +1855,6 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 						celln=(int)gd.getNextNumber();
 						skipconfirmation=!gd.getNextBoolean();
 						reconfirming=true;
-						editRoi=true;
 						break;
 					case "autoacceptall":
 						autoAcceptAll();
@@ -2178,6 +2283,14 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				}
 			});
 			options.add(mi);
+			mi=new MenuItem("Import All Rois from Manager");
+			mi.addActionListener(new ActionListener() {
+				@Override
+				public void actionPerformed(ActionEvent e) {
+					importAllRoisFromManager();
+				}
+			});
+			options.add(mi);
 			dropDownMenu.add(options);
 			dropDownMenu.addActionListener(new ActionListener() {
 				@Override
@@ -2318,6 +2431,77 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				ajtctcpimpAllroi=addRoi(ajtctcpimpAllroi, roi);
 			}
 		}
+	}
+
+	private void importAllRoisFromManager() {
+		if(simp.getNFrames()>1) {
+			IJ.log("RoiManager Import not currently working for multi-frame images");
+			return;
+		}
+		RoiManager rm=RoiManager.getInstance();
+		String source="RoiManager";
+		int startWithRoi=1;
+		if(celln>1) {
+			if(ajtctcpimp!=null){
+				String info=ajtctcpimp.getInfoProperty();
+				if(info!=null && info.contains("importFromCell: ")) {
+					String[] lines=info.split("\n");
+					for(String line : lines) {
+						if(line.startsWith("importFromCell: ")) {
+							String[] parts=line.split(": ");
+							try {
+								startWithRoi=Integer.parseInt(parts[1].trim());
+							}catch(NumberFormatException e) {
+								startWithRoi=celln;
+							}
+						}
+					}
+				}
+			}
+			GenericDialog gd=new GenericDialog("Import All Rois");
+			gd.addMessage("Current cell number is "+celln+"\nDo you want to start importing from this cell number or another?");
+			gd.addNumericField("Start importing from cell number:", celln, 0);
+			gd.showDialog();
+			if(gd.wasCanceled())return;
+			startWithRoi=(int)gd.getNextNumber();
+		}
+		if(rm==null || rm.getCount()==0) {
+			if(ajtctcpimp!=null){
+				YesNoCancelDialog ync=new YesNoCancelDialog(null, "Import All Rois", "No RoiManager rois found, but AJTCTcp image is present\nDo you want to import all rois from AJTCTcp?");
+				if(ync.yesPressed()){
+					allRois=new ArrayList<Roi>();
+					masksToRois(ajtctcpimp.getProcessor(), true, allRois, startWithRoi);
+					source="AJTCTcp";
+				}else return;
+			}else{
+				IJ.error("No RoiManager rois found, please open RoiManager and add rois");
+				return;
+			}
+		}else {
+			allRois=new ArrayList<Roi>(Arrays.asList(rm.getRoisAsArray()));
+			if(startWithRoi>1) {
+				if(allRois.size()<startWithRoi) {
+					IJ.error("Not enough rois in RoiManager to skip first "+(startWithRoi-1)+" rois");
+					return;
+				}
+				allRois=new ArrayList<Roi>(allRois.subList(startWithRoi-1, allRois.size()));
+			}
+		}
+		YesNoCancelDialog ync=new YesNoCancelDialog(null, "Import All Rois", "Importing all rois from " + source + "\nDo you want to confirm each one?");
+		if(ync.cancelPressed())return;
+		if(ync.yesPressed()){
+			importingFromAllRois=true;
+			curWand[0]=null;
+			acceptedROI.set(true);
+			return;
+		}
+		for(Roi roi : allRois) {
+			int frame=roi.getTPosition();
+			if(frame==0)frame=1;
+			results.appendLineFromRoi(roi, frame, true, true);
+			celln++;
+		}
+		results.rt.updateResults();
 	}
 
 	private boolean isCCR2Frame(int fr) {
@@ -2814,7 +2998,6 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	
 	public void editRoi() {
 		editRoi=false;
-		if(reconfirming){editRoi(celln); return;}
 		NonBlockingGenericDialog gd=new NonBlockingGenericDialog("Which Roi");
 		gd.addNumericField("Which Roi to edit (Label="+cellLabel+")?", celln-1, 0);
 		gd.showDialog();
@@ -2856,18 +3039,23 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					tip.setColor(Color.BLACK);
 					tip.fill(new Roi(centroid.x-5,centroid.y-22,25,20));
 				}
-				Rectangle sr=simp.getCanvas().getSrcRect();
-				if(sr.x!=0 || sr.y!=0 || sr.width!=simp.getWidth() || sr.height!=simp.getHeight()) {
-					sr.x=Math.max(0,centroid.x-(sr.width/2)); sr.y=Math.max(0,centroid.y-(sr.height/2));
-					simp.getCanvas().setSourceRect(sr);
-					simp.updateAndDraw();
-				}
+				setSrcRectAtPoint(centroid);
 			}
 		}
 		simp.setPosition(simp.getC(),zcur1,1);
 		timp.setPosition(timp.getC(),timp.getZ(),1);
 		if(curWand[0]!=null)curWand[0].showBoth();
 		tctpanel.setTextLine(TctLines.CURRENTCELL, "Editing "+cellLabel+" Cell: "+celln);
+	}
+
+	private void setSrcRectAtPoint(Point p) {
+		if(p==null)return;
+		Rectangle sr=simp.getCanvas().getSrcRect();
+		if(sr.x!=0 || sr.y!=0 || sr.width!=simp.getWidth() || sr.height!=simp.getHeight()) {
+			sr.x=Math.max(0,p.x-(sr.width/2)); sr.y=Math.max(0,p.y-(sr.height/2));
+			simp.getCanvas().setSourceRect(sr);
+			simp.updateAndDraw();
+		}
 	}
 
 	public static Roi selectCell(int cell){
@@ -2963,7 +3151,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		if(roi==null)roi=imp.getRoi();
 		int[] zvs=getCellZLine(imp, imp.getC(), imp.getT(), roi);
 		int[] maxs=getLocalMaxima(zvs);
-		return maxs[0];
+		return (maxs[0]+1);
 	}
 
 	public int getClosestMaxZ(){
@@ -3045,6 +3233,75 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		return result;
 	}
 
+	public static void masksToRois(){
+		ArrayList<Roi> rois=masksToRois(null);
+		if(rois==null || rois.isEmpty())return;
+		RoiManager rm=RoiManager.getRoiManager();
+		for(Roi roi:rois){
+			if(roi!=null)rm.addRoi(roi);
+		}
+	}
+
+	public static ArrayList<Roi> masksToRois(ImageProcessor ip){
+		return masksToRois(ip, false, new ArrayList<Roi>(), 1);
+	}
+
+	public static ArrayList<Roi> masksToRois(ImageProcessor ip, boolean inBackground, final ArrayList<Roi> rois, int start){
+		if(ip==null){
+			ImagePlus imp=WindowManager.getCurrentImage();
+			if(imp==null)return null;
+			ip=imp.getProcessor();
+		}
+		if(ip==null)return null;
+		if(rois==null){
+			IJ.error("Must supple an ArrayList<Roi> to store results");
+			return null;
+		}
+		int max=0;
+		for(int y=0;y<ip.getHeight();y++){
+			for(int x=0;x<ip.getWidth();x++){
+				int v=ip.get(x, y);
+				if(v>max)max=v;
+			}
+		}
+		for(int i=start;i<=max;i++){
+			ip.setThreshold(i, i);
+			ThresholdToSelection tts=new ThresholdToSelection();
+			Roi roi=tts.convert(ip);
+			if(roi!=null){
+				rois.add(roi);
+				start=i+1;
+				break;
+			}
+		}
+		final int startf=start+1;
+		final int maxf=max;
+		final ImageProcessor fip=ip;
+		Thread thread=new Thread(new Runnable() {
+			public void run() {
+				for(int i=startf;i<=maxf;i++){
+					fip.setThreshold(i, i);
+					ThresholdToSelection tts=new ThresholdToSelection();
+					Roi roi=tts.convert(fip);
+					if(roi!=null)rois.add(roi);
+					IJ.showProgress(((double)i+1.0)/(double)maxf);
+				}
+				fip.resetThreshold();
+				fip.setLut(LUT_GLASBEY_INV);
+				fip.setMinAndMax(0, maxf);
+			}
+		});
+		thread.start();
+		if(!inBackground) {
+			try {
+				thread.join();
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		}
+		return rois;
+	}
+
 	public synchronized void mouseWheelMoved(MouseWheelEvent e) {
 		if(addDirectRoi)return;
 		int rotation = e.getWheelRotation();
@@ -3099,13 +3356,15 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 
 	public void mousePressed(MouseEvent e) { 
 		if(IJ.spaceBarDown() || addDirectRoi) return;
-		if((IJ.altKeyDown() || IJ.shiftKeyDown() && e.getButton()==MouseEvent.BUTTON1) || e.getButton()==MouseEvent.BUTTON2) {
+		// || e.getButton()==MouseEvent.BUTTON2
+		if((IJ.altKeyDown() || IJ.shiftKeyDown() && e.getButton()==MouseEvent.BUTTON1)) {
 			if(IJ.altKeyDown() )altWasDown.set(true);
 			if(IJ.shiftKeyDown())shiftWasDown.set(true);
 			IJ.setKeyUp(KeyEvent.VK_ALT);
 			IJ.setKeyUp(KeyEvent.VK_SHIFT);
 			DirectRoiTypes rtype=DirectRoiTypes.ADDITIVE;
-			if(shiftWasDown.get() && altWasDown.get() || e.getButton()==MouseEvent.BUTTON2)rtype=DirectRoiTypes.ONLY_WITHIN;
+			// || e.getButton()==MouseEvent.BUTTON2
+			if(shiftWasDown.get() && altWasDown.get())rtype=DirectRoiTypes.ONLY_WITHIN;
 			else if(altWasDown.get())rtype=DirectRoiTypes.SUBTRACTIVE;
 			beginDirectRoi(rtype);
 			MouseEvent newe=new MouseEvent(simp.getCanvas(), e.getID(), e.getWhen(), e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), e.getX(), e.getY(), e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
@@ -3122,12 +3381,20 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			if(DEBUG) IJ.log("Position: "+xy.x+" "+xy.y);
 			buttonpress[0]=true;
 		}
-		//if((flags & InputEvent.BUTTON2_DOWN_MASK) !=0)buttonpress[1]=true;
+		if((flags & InputEvent.BUTTON2_DOWN_MASK) !=0) {
+			buttonpress[1]=true;
+			simp.resetRoi();
+			timp.resetRoi();
+			if(importingFromAllRois) {
+				acceptedROI.set(true);
+			}
+		}
 		if((flags & InputEvent.BUTTON3_DOWN_MASK) !=0) {buttonpress[2]=true; acceptedROI.set(true);}
 	}
 	
 	public void mouseDragged(MouseEvent e) {
-		if((altWasDown.get() || shiftWasDown.get() && e.getButton()==MouseEvent.BUTTON1)|| e.getButton()==MouseEvent.BUTTON2) {
+		// || e.getButton()==MouseEvent.BUTTON2
+		if((altWasDown.get() || shiftWasDown.get() && e.getButton()==MouseEvent.BUTTON1)) {
 			MouseEvent newe=new MouseEvent(simp.getCanvas(), e.getID(), e.getWhen(), e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), e.getX(), e.getY(), e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
 			simp.getCanvas().mouseDragged(newe);
 			e.consume();
@@ -3148,7 +3415,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			return;
 		}
 		**/
-		if(altWasDown.get() || shiftWasDown.get() && e.getButton()==MouseEvent.BUTTON1 || e.getButton()==MouseEvent.BUTTON2) {
+		// || e.getButton()==MouseEvent.BUTTON2
+		if(altWasDown.get() || shiftWasDown.get() && e.getButton()==MouseEvent.BUTTON1) {
 			if(DEBUG) IJ.log("alt or shift release");
 			MouseEvent newe=new MouseEvent(simp.getCanvas(), e.getID(), e.getWhen(), e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), e.getX(), e.getY(), e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
 			simp.getCanvas().mouseReleased(newe);
@@ -3160,7 +3428,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			int index=xys.get(pointIndex).getDirectRoiSize()-1;
 			if(index<0)index=0;
 			DirectRoiTypes rtype=DirectRoiTypes.ADDITIVE;
-			if(shiftWasDown.get() && altWasDown.get() || e.getButton()==MouseEvent.BUTTON2)rtype=DirectRoiTypes.ONLY_WITHIN;
+			// || e.getButton()==MouseEvent.BUTTON2
+			if(shiftWasDown.get() && altWasDown.get())rtype=DirectRoiTypes.ONLY_WITHIN;
 			else if(altWasDown.get())rtype=DirectRoiTypes.SUBTRACTIVE;
 			completeDirectRoi(rtype,index,roi, true);
 			altWasDown.set(false);
@@ -3168,10 +3437,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		}
 		if(DEBUG) IJ.log("buttonReleased: "+e.getModifiersEx()+" button: "+e.getButton());
 		if(e.getButton()==MouseEvent.BUTTON1)buttonpress[0]=false;
-		//if(e.getButton()==MouseEvent.BUTTON2) {
+		if(e.getButton()==MouseEvent.BUTTON2) {
 		//	IJ.run("Previous Slice [<]");
-		//	buttonpress[1]=false;
-		//}
+			buttonpress[1]=false;
+		}
 		if(e.getButton()==MouseEvent.BUTTON3) {
 			buttonpress[2]=false;
 			//else{acceptedROI=true;}
@@ -3859,7 +4128,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			}
 			fillStats();
 			updateOutput(roin);
-			tctpanel.setTextLine(TctLines.LASTACCEPTED, getInfoString());
+			if(tctpanel!=null)tctpanel.setTextLine(TctLines.LASTACCEPTED, getInfoString());
 			accepted=true;
 		}
 
@@ -3882,6 +4151,11 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			ImageProcessor tip1=ist.getProcessor(timp.getStackIndex(1, labelsl, fr));
 			ImageProcessor tip2=ist.getProcessor(timp.getStackIndex(2, labelsl, fr));
 			if(troi!=null) {
+				if(celln>255 && timp.getBitDepth()==8) {
+					IJ.showMessage("Converting AJTCT to 16-bit image because > 255 cells");
+					(new StackConverter(timp)).convertToGray16();
+					timp.setProperty("Info", results.getText(true));
+				}
 				tip1.setRoi(troi);
 				ImageStatistics imgstat=ImageStatistics.getStatistics(tip1, 127, timp.getCalibration());
 				tip1.setColor(celln);

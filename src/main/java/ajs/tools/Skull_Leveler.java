@@ -13,6 +13,7 @@ import ij.gui.DialogListener;
 import ij.WindowManager;
 import ij.gui.GenericDialog;
 import ij.gui.Overlay;
+import ij.gui.PointRoi;
 import ij.gui.Roi;
 import ij.measure.Calibration;
 import ij.measure.CurveFitter;
@@ -29,8 +30,9 @@ public class Skull_Leveler implements PlugIn {
 		//final String[] METHODS_MP=new String[]{"Min","Two-Mac"};
 		//final String[] MAPTYPES=new String[]{"1st Channel - Skull", "2nd Channel - Mac bi-layer"};
 		final String[] TMETHODS=new String[] {"First Frame", "Ave T-projection", "For Each Frame"};
-        final String[] SkullLevelingMethods=new String[]{"Use CPU Flattening", "Use GPU Thin Plate Spline", "Do not flatten"};
-		final int MINXMEANVAL=50;
+        final String[] SkullLevelingMethods=new String[]{"Direct Flattening CPU", "Thin Plate Spline GPU", "Thin Plate Spline CPU", "Do not flatten"};
+		enum SLM {DIRECT_CPU, TPS_GPU, TPS_CPU, NONE};
+        final int MINXMEANVAL=50;
 		final String MAP_SUFFIX="-SkullLeveler-map";
 		//String maptype=MAPTYPES[0];
 		String tmethod=TMETHODS[0];
@@ -58,10 +60,16 @@ public class Skull_Leveler implements PlugIn {
 		String title=oimp.getTitle();
 		
 		String[] imtitles=WindowManager.getImageTitles();
-		if(title.contains(MAP_SUFFIX) && WindowManager.getImage(title.substring(0,title.indexOf(MAP_SUFFIX)))!=null) {
-			title=title.substring(0,title.indexOf(MAP_SUFFIX));
-			oimp=WindowManager.getImage(title);
+		if(title.contains(MAP_SUFFIX)) {
+            String altTitle=title.substring(0,title.indexOf(MAP_SUFFIX));
+            if(WindowManager.getImage(altTitle)!=null){
+			    oimp=WindowManager.getImage(altTitle);
+            }else if(WindowManager.getImage(altTitle+".tif")!=null){
+			    oimp=WindowManager.getImage(altTitle+".tif");
+            }
+            title=oimp.getTitle();
 		}
+        String basetitle=title.endsWith(".tif")?title.substring(0,title.length()-4):title;
 		ArrayList<String> mapnames=new ArrayList<String>();
 		mapnames.add("Generate new map");
         mapnames.add("Import Points from CSV");
@@ -83,7 +91,8 @@ public class Skull_Leveler implements PlugIn {
         }
 		String mapname="";
 		String defaultMapName=mapnames.get(0);
-        if(WindowManager.getImage(title+MAP_SUFFIX)!=null)defaultMapName=title+MAP_SUFFIX;
+        if(WindowManager.getImage(basetitle+MAP_SUFFIX)!=null)defaultMapName=basetitle+MAP_SUFFIX;
+        else if(WindowManager.getImage(title+MAP_SUFFIX)!=null)defaultMapName=title+MAP_SUFFIX;
 
 		GenericDialog gd=new GenericDialog("SkullLeveler");
 		gd.addMessage("Working on "+title);
@@ -144,7 +153,7 @@ public class Skull_Leveler implements PlugIn {
 		rfd=(int)gd.getNextNumber();
 		reExpandSmoothMap=gd.getNextBoolean();
 		mapBlurSigma=(int)gd.getNextNumber();
-        String skullLevelMethod=gd.getNextChoice();
+        SLM skullLevelMethod=SLM.values()[gd.getNextChoiceIndex()];
 		doResliceROIs=gd.getNextBoolean();
 		//maptype=gd.getNextChoice();
 
@@ -155,7 +164,9 @@ public class Skull_Leveler implements PlugIn {
 
 		if(mapname.contains(MAP_SUFFIX))mapimp=WindowManager.getImage(mapname);
 		if(mapname.contentEquals("Use ROI Points") && pts!=null) {
-            skullLevelMethod=SkullLevelingMethods[1];
+            if(skullLevelMethod==SLM.DIRECT_CPU) {
+                mapimp=roisToMap(oimp);
+            }
         }
         if(mapname.contentEquals("Import Points from CSV")){
             String path=IJ.getFilePath("Select CSV with control points (x,y,z) for TPS flattening");
@@ -184,11 +195,15 @@ public class Skull_Leveler implements PlugIn {
             }
             pts=AJ_Misc_Plugins.getPointsFromCSV(lines, labelFilter, 1, oimp);
             AJ_Misc_Plugins.ptsToPointRoi(pts, oimp);
-            skullLevelMethod=SkullLevelingMethods[1];
+            if(skullLevelMethod==SLM.DIRECT_CPU) {
+                mapimp=roisToMap(oimp);
+            }
         }
         if(mapname.contentEquals("Generate new map"))generateSkullMap();
-        if(skullLevelMethod.contentEquals(SkullLevelingMethods[0]) && mapimp!=null)skullLevel();
-        else if(skullLevelMethod.contentEquals(SkullLevelingMethods[1])) {
+        if(skullLevelMethod==SLM.DIRECT_CPU){
+            if(mapimp!=null)skullLevel();
+            else return;
+        } else if(skullLevelMethod!=SLM.NONE) {
             if(pts==null && mapimp!=null){
                 pts=HeightmapToTPS.extractControlPointsAdaptive(
                     mapimp, mapimp.getWidth()/16, 200, 10
@@ -202,7 +217,7 @@ public class Skull_Leveler implements PlugIn {
             }
             IJ.log("TPS Flattening with "+pts.length+" control points");
             TPS_Flatten tpsFlatten=new TPS_Flatten();
-            tpsFlatten.flattenStack(oimp, pts, true);
+            tpsFlatten.flattenStack(oimp, pts, skullLevelMethod==SLM.TPS_GPU);
         }
         if(doResliceROIs && mapimp!=null) resliceROIs();
     }
@@ -211,7 +226,9 @@ public class Skull_Leveler implements PlugIn {
         if(oimp==null)return null;
         
 		int h=oimp.getHeight(), w=oimp.getWidth(), sls=oimp.getNSlices(), frms=oimp.getNFrames();
-		String maptitle=oimp.getTitle()+MAP_SUFFIX;
+        String title=oimp.getTitle();
+        String basetitle=title.endsWith(".tif")?title.substring(0,title.length()-4):title;
+		String maptitle=basetitle+MAP_SUFFIX;
 		ImageStack mapstack=null;
 		FloatProcessor fp=null;
 		float zmin=65535, zmax=0;
@@ -436,35 +453,122 @@ public class Skull_Leveler implements PlugIn {
 	}
     
     public ImagePlus resliceROIs() {
-			IJ.showStatus("Reslicing ROIs");
-			FloatProcessor fp=(FloatProcessor)mapimp.getProcessor();
-			ImagePlus rsimp=WindowManager.getImage("Reslice of "+oimp.getTitle());
-			if(rsimp==null) {
-				WindowManager.setTempCurrentImage(oimp);
-				oimp.deleteRoi();
-				IJ.run("Reslice [/]...", "start=Top");
-				rsimp=WindowManager.getCurrentImage();
-			}
-			rsimp.setOverlay(new Overlay());
-			int zprev=0;
-			for(int i=0;i<mapimp.getHeight();i++) {
-				int z=(int)Math.floor((double)i/(double)mapimp.getHeight()*(double)rsimp.getNSlices())+1;
-				if(z>zprev){
-					zprev=z;
-					int[] xpoints=new int[mapimp.getWidth()];
-					int[] ypoints=new int[mapimp.getWidth()];
-					for(int j=0;j<mapimp.getWidth();j++) {
-						xpoints[j]=(int)((double)j*rsimp.getWidth()/(double)mapimp.getWidth());
-						ypoints[j]=(int)((double)fp.getf(j,i)*(double)rsimp.getHeight()/(double)oimp.getNSlices());
-					}
-					ij.gui.PolygonRoi proi=new ij.gui.PolygonRoi(xpoints, ypoints, xpoints.length, Roi.POLYLINE);
-					if(rsimp.isHyperStack())proi.setPosition(0,z,0);
-					else proi.setPosition(z);
-					rsimp.setPosition(1, z, 1);
-					rsimp.getOverlay().add(proi);
-				}
-			}
-			IJ.showStatus("Reslice ROIs complete");
-            return rsimp;
-		}
+        IJ.showStatus("Reslicing ROIs");
+        FloatProcessor fp=(FloatProcessor)mapimp.getProcessor();
+        ImagePlus rsimp=WindowManager.getImage("Reslice of "+oimp.getTitle());
+        if(rsimp==null) {
+            WindowManager.setTempCurrentImage(oimp);
+            oimp.deleteRoi();
+            IJ.run("Reslice [/]...", "start=Top");
+            rsimp=WindowManager.getCurrentImage();
+        }
+        rsimp.setOverlay(new Overlay());
+        int zprev=0;
+        for(int i=0;i<mapimp.getHeight();i++) {
+            int z=(int)Math.floor((double)i/(double)mapimp.getHeight()*(double)rsimp.getNSlices())+1;
+            if(z>zprev){
+                zprev=z;
+                int[] xpoints=new int[mapimp.getWidth()];
+                int[] ypoints=new int[mapimp.getWidth()];
+                for(int j=0;j<mapimp.getWidth();j++) {
+                    xpoints[j]=(int)((double)j*rsimp.getWidth()/(double)mapimp.getWidth());
+                    ypoints[j]=(int)((double)fp.getf(j,i)*(double)rsimp.getHeight()/(double)oimp.getNSlices());
+                }
+                ij.gui.PolygonRoi proi=new ij.gui.PolygonRoi(xpoints, ypoints, xpoints.length, Roi.POLYLINE);
+                if(rsimp.isHyperStack())proi.setPosition(0,z,0);
+                else proi.setPosition(z);
+                rsimp.setPosition(1, z, 1);
+                rsimp.getOverlay().add(proi);
+            }
+        }
+        IJ.showStatus("Reslice ROIs complete");
+        return rsimp;
+    }
+
+    public ImagePlus roisToMap(ImagePlus imp) {
+        if(imp==null){IJ.noImage(); return null;}
+        Roi roi=imp.getRoi();
+        if(roi==null || roi.getType()!=Roi.POINT) {
+            IJ.error("No PointRoi selected");
+            return null;
+        }
+        PointRoi pointRoi=(PointRoi)roi;
+        if(pointRoi.getFloatPolygon().npoints<4) {
+            IJ.error("PointRoi must contain at least 4 points for TPS map generation");
+            return null;
+        }
+
+        int n=pointRoi.getFloatPolygon().npoints;
+        double[][] src=new double[n][3];
+        double avgZ=0.0;
+        for(int i=0;i<n;i++) {
+            src[i][0]=pointRoi.getFloatPolygon().xpoints[i];
+            src[i][1]=pointRoi.getFloatPolygon().ypoints[i];
+            int slice=pointRoi.getPointPosition(i);
+            if(slice<=0){IJ.error("PointRoi points must have a slice position"); return null;}
+            src[i][2]=(double)imp.convertIndexToPosition(slice)[1];
+            avgZ+=src[i][2];
+        }
+        avgZ/=n;
+
+        double[][] srcPts=new double[n*2][3];
+        double[][] tgtPts=new double[n*2][3];
+        for(int i=0;i<n;i++) {
+            srcPts[i][0]=src[i][0];
+            srcPts[i][1]=src[i][1];
+            srcPts[i][2]=src[i][2];
+            srcPts[i+n][0]=src[i][0];
+            srcPts[i+n][1]=src[i][1];
+            srcPts[i+n][2]=src[i][2]+10.0;
+
+            tgtPts[i][0]=src[i][0];
+            tgtPts[i][1]=src[i][1];
+            tgtPts[i][2]=avgZ;
+            tgtPts[i+n][0]=src[i][0];
+            tgtPts[i+n][1]=src[i][1];
+            tgtPts[i+n][2]=avgZ+10.0;
+        }
+
+        // Inverse TPS (target -> source) lets us query source z at each flattened (x,y,avgZ).
+        ThinPlateSpline3D inverseTps;
+        try {
+            inverseTps=new ThinPlateSpline3D(srcPts, tgtPts, 1e-3);
+        } catch(Exception e) {
+            IJ.error("Failed to fit TPS for map generation\n"+e.getLocalizedMessage());
+            return null;
+        }
+
+        int w=imp.getWidth(), h=imp.getHeight();
+        FloatProcessor fp=new FloatProcessor(w, h);
+        float zmin=Float.MAX_VALUE, zmax=-Float.MAX_VALUE;
+        for(int y=0;y<h;y++) {
+            IJ.showProgress((double)(y+1)/(double)h);
+            for(int x=0;x<w;x++) {
+                double[] sourcePt=inverseTps.transform(new double[]{x, y, avgZ});
+                float z=(float)sourcePt[2];
+                fp.setf(x, y, z);
+                if(z<zmin)zmin=z;
+                if(z>zmax)zmax=z;
+            }
+        }
+        float zcap=zmax-zmin;
+        if(zcap > (float)imp.getNSlices()) {
+            zcap=(float)imp.getNSlices();
+        }
+        for(int y=0;y<h;y++) {
+            IJ.showProgress((double)(y+1)/(double)h);
+            for(int x=0;x<w;x++) {
+                float z=fp.getf(x,y)-zmin;
+                if(z>zcap) z=zcap;
+                fp.setf(x,y,z);
+            }
+        }
+        IJ.log("Generated TPS map from PointRoi with "+n+" points. Z-Range: 0 to "+IJ.d2s(zmax-zmin,3)+" capped to "+IJ.d2s(zcap,3));
+        ImagePlus res=new ImagePlus(imp.getTitle()+MAP_SUFFIX, fp);
+        java.awt.image.IndexColorModel cm=ij.plugin.LutLoader.getLut("Thermal");
+        if(cm!=null)
+            res.setLut(new ij.process.LUT(cm,zmin,zmax));
+        res.show();
+        return res;
+    }
 }
