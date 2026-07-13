@@ -8,6 +8,8 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
+import java.io.InputStreamReader;
+import java.io.PrintStream;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -1374,6 +1376,101 @@ public class AJ_Misc_Plugins implements PlugIn {
 		}
 		out.show();
 
+	}
+
+	public static void runExternalCellpose(){
+		String pythonPath=Prefs.get("AJ.cellposePythonPath", "");
+		String tempdir=IJ.getDirectory("temp");
+		String scriptPath=tempdir + "getCellposeAJTCT.py";
+		if(!(new File(pythonPath)).exists()){
+			IJ.showMessage("Please find cellpose3 python executable (the python.exe in your cellpose environment)");
+			pythonPath=IJ.getFilePath("Find cellpose3 python executable (the python.exe in your cellpose environment)");
+			if(pythonPath==null || pythonPath.isEmpty()) return;
+			Prefs.set("AJ.cellposePythonPath", pythonPath);
+		}
+		try {
+			PrintStream ps=new PrintStream(scriptPath);
+			BufferedReader reader = new BufferedReader(new InputStreamReader(AJ_Misc_Plugins.class.getClassLoader().getResource("getCellposeAJTCT.py").openStream()));
+			String contents="";
+			String adder=reader.readLine();
+			while(adder!=null) {
+				contents+=adder+"\n";
+				adder=reader.readLine();
+			}
+			ps.print(contents);
+			ps.close();
+		}catch(Exception e) {
+				IJ.error("Error: Could not write getCellposeAJTCT.py file "+e.getMessage());
+				return;
+		}
+		ImagePlus imp=WindowManager.getCurrentImage();
+		if(imp==null) return;
+		String title=imp.getTitle();
+		String dir=imp.getOriginalFileInfo().directory;
+		int ch=0, sl=0;
+		GenericDialog gd=new GenericDialog("Cellpose Segment");
+		gd.addMessage("Cellpose Segment this file?:\n"+title);
+		if(imp.getNChannels()>1){
+			String[] chs=new String[imp.getNChannels()];
+			for(int i=0; i<imp.getNChannels(); i++)chs[i]=""+(i+1);
+			gd.addChoice("Cellpose channel to segment:", chs, chs[1]);
+		}
+		if(imp.getNSlices()>1){
+			String[] sls=new String[imp.getNSlices()];
+			for(int i=0; i<imp.getNSlices(); i++)sls[i]=""+(i+1);
+			gd.addChoice("Cellpose slice to segment:", sls, sls[imp.getZ()-1]);
+		}
+		gd.showDialog();
+		if(imp.getNChannels()>1)
+			ch = gd.getNextChoiceIndex() + 1;
+		if(imp.getNSlices()>1)
+			sl = gd.getNextChoiceIndex() + 1;
+		if(gd.wasCanceled())return;
+		if(!title.endsWith(".tif")) title=title+".tif";
+		if(dir==null || dir.isEmpty()){
+			IJ.log("Dir empty trying macro");
+			IJ.runMacro("getInfo(\"image.directory\")");
+			String log=IJ.getLog();
+			if(log!=null){
+				String[] lines=log.split("\n");
+				dir=lines[lines.length-1].trim();
+				if(dir.startsWith("Dir empty"))dir=null;
+			}
+		}
+		boolean tempSave=false;
+		if(dir==null || dir.isEmpty()){
+			dir=IJ.getDirectory("temp")+"ijcellpose"+File.separator;
+			(new File(dir)).mkdir();
+			IJ.saveAs("tiff", dir+title);
+			IJ.log("Saved image to "+dir+title);
+			tempSave=true;
+		}
+		String inputPath=(dir+title).replace("\\", "/");
+		IJ.log("Running command: "+pythonPath+" "+scriptPath+" on input:");
+		IJ.log(inputPath);
+		ProcessBuilder pb = new ProcessBuilder(pythonPath,scriptPath,inputPath, ""+ch, ""+sl);
+		try {
+			Process p = pb.start();
+			BufferedReader b = new BufferedReader(new InputStreamReader(p.getInputStream()));
+			String line = "";
+			while ((line = b.readLine()) != null) {
+				IJ.log(line);
+			}
+			b.close();
+			p.waitFor();
+		} catch (Exception ex) {
+			ex.printStackTrace();
+		}
+		String outputPath=inputPath.substring(0,inputPath.length()-4)+"-AJTCTcp.tif";
+		outputPath=outputPath.replace("/","\\");
+		IJ.wait(500);
+		if((new File(outputPath)).exists()){ 
+			IJ.open(outputPath);
+			IJ.run("glasbey inverted");
+			IJ.log("Cellpose output completed.");
+			if(tempSave) WindowManager.getCurrentImage().changes=true;
+			else IJ.save(outputPath);
+		}else IJ.log("Error could not find AJTCTcp output file: "+outputPath);
 	}
 	
 }
