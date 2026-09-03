@@ -3055,6 +3055,12 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			sr.x=Math.max(0,p.x-(sr.width/2)); sr.y=Math.max(0,p.y-(sr.height/2));
 			simp.getCanvas().setSourceRect(sr);
 			simp.updateAndDraw();
+			timp.getCanvas().setSourceRect(sr);
+			timp.updateAndDraw();
+			if(ajtctcpimp!=null) {
+				ajtctcpimp.getCanvas().setSourceRect(sr);
+				ajtctcpimp.updateAndDraw();
+			}
 		}
 	}
 
@@ -3689,7 +3695,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		}
 
 		public void setSliceChannel(int slice, int channel) {
-			if(this.sl==slice)return;
+			if(this.sl==slice && this.ch==channel)return;
 			this.sl=slice;
 			prevsl=slice;
 			this.ch=channel;

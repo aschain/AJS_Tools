@@ -1098,6 +1098,20 @@ public class AJ_Misc_Plugins implements PlugIn {
 	static public void CCR2ConcatChs(){
 		int[] imids=WindowManager.getIDList();
 		if(imids==null || imids.length<2) {IJ.error("Need at least two images"); return;}
+		boolean[] keepChs1=new boolean[3], keepChs2=new boolean[3];
+		GenericDialog gd=new GenericDialog("CCR2ConcatChs");
+		gd.addMessage("Higher wavelength (~890 nm) channels to keep:");
+		gd.addCheckboxGroup(1, 3, new String[]{"1", "2", "3"}, new boolean[]{true, true, true});
+		gd.addMessage("Lower wavelength (~775 nm) channels to keep:");
+		gd.addCheckboxGroup(1, 3, new String[]{"1", "2", "3"}, new boolean[]{false, false, true});
+		gd.showDialog();
+		if(gd.wasCanceled()) return;
+		for(int i=0; i<3; i++) {
+			keepChs1[i]=gd.getNextBoolean();
+		}
+		for(int i=0; i<3; i++) {
+			keepChs2[i]=gd.getNextBoolean();
+		}
 		ArrayList<Integer> doneIds=new ArrayList<Integer>();
 		for(int id: imids) {
 			if(doneIds.contains(id))continue;
@@ -1118,7 +1132,7 @@ public class AJ_Misc_Plugins implements PlugIn {
 				if((Math.abs(locx1 - locx2) < 2) && (Math.abs(locy1 - locy2) < 2)) {
 					int wv2=get2pWaveLength(imp2);
 					if(wv1!=wv2){
-						if(wv1<780 && wv2>820) {
+						if(wv1<790 && wv2>820) {
 							ImagePlus temp=imp;
 							imp=imp2;
 							imp2=temp;
@@ -1162,7 +1176,7 @@ public class AJ_Misc_Plugins implements PlugIn {
 						}else {
 							IJ.log("CCR2Concat: "+imp.getTitle()+"("+wv1+")"+" "+locs[0]+" "+locs[1]+" matched "+imp2.getTitle()+"("+wv2+")"+" "+locs2[0]+" "+locs2[1]);
 						}
-						ImagePlus out=concatenateChannels(imp, imp2, null, new boolean[] {false, false, true});
+						ImagePlus out=concatenateChannels(imp, imp2, keepChs1, keepChs2);
 						if(xShift!=0 || yShift!=0 || zShift!=0) {
 							XYZShiftChannel(out, 4, xShift, yShift, zShift, true);
 						}
