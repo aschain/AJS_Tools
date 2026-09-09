@@ -34,8 +34,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 
 	private final static String version="1.5.0";
 	private static boolean DEBUG=false;
-	private final static double LIPO_RATIO=0.5;
-	private final static int AVERATIO_GREEN_MIN=50;
+	private static double LIPO_RATIO=0.5;
+	private static int AVERATIO_GREEN_MIN=50;
 	public static enum HEADINGS{
 		LABEL("Label", true), ROI("ROI"), CELL("Cell"), AREA("Area"), PERIMETER("Perimeter"), CIRCULARITY("Circularity"), X("X"), Y("Y"),
 		MEAN("Mean"), SLICE("Slice"), FRAME("Frame"), THRESH("Thresh"), TIME("Time"), REDMEAN("RedMean"), GREENPIXELS("GreenPixels"), 
@@ -133,7 +133,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	private String spath="";
 	private boolean editing=false, reconfirming=false, skipconfirmation=false, importingFromAllRois=false;
 	private ArrayList<Roi> allRois=null;
-	private int greench=2, redch=3;
+	private static int greench=2, redch=3;
 	private Roi axonRoi=null, duraBVRoi=null, piaBVRoi=null;
 	private boolean showAllRois=true;
 	private Roi showAllRoi=null, ajtctcpimpAllroi=null;
@@ -475,6 +475,32 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		if(imps==null)return;
 		simp=imps[0]; timp=imps[1]; ajtctcpimp=imps[2];
 		if(!setup())return;
+
+		int chs=simp.getNChannels();
+
+		GenericDialog tctgd=new GenericDialog("AJTCT");
+		tctgd.addMessage("AJTCT ver "+version);
+		tctgd.addMessage("Working on: "+title);
+		tctgd.addNumericField("Green Ch:", greench<=chs?greench:1);
+		tctgd.addNumericField("Red Ch:", redch<=chs?redch:(chs>=2?2:1));
+		tctgd.addCheckbox("Adjust LUTs?", true);
+		tctgd.showDialog();
+		if(tctgd.wasCanceled())return;
+		greench=(int)tctgd.getNextNumber();
+		redch=(int)tctgd.getNextNumber();
+		greench=Math.max(1, Math.min(greench, chs));
+		redch=Math.max(1, Math.min(redch, chs));
+		if(tctgd.getNextBoolean()){
+			if(simp.isComposite()){
+				LUT[] luts=((CompositeImage)simp).getLuts();
+				LUT green=new LUT(ij.plugin.LutLoader.getLut("green"),luts[greench-1].min,luts[greench-1].max);
+				LUT red=new LUT(ij.plugin.LutLoader.getLut("red"),luts[redch-1].min,luts[redch-1].max);
+				((CompositeImage)simp).setChannelLut(green, greench);
+				((CompositeImage)simp).setChannelLut(red, redch);
+				simp.updateAndDraw();
+			}
+		}
+		tctgd=null;
 
 		//Start Results Window
 		results=new TctTextWindow(basetitle);
@@ -3077,7 +3103,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		int frame=timp.getFrame();
 		if(roi!=null) {
 			timp.setRoi(roi);
-			simp.setPosition(simp.getNChannels()>2?2:1, getZforCellFrame(text, simp.getNFrames(), timp.getStack().getSliceLabel(timp.getCurrentSlice()).split("\n")[0], cell, frame), frame);
+			simp.setPosition(simp.getNChannels()>=greench?greench:1, getZforCellFrame(text, simp.getNFrames(), timp.getStack().getSliceLabel(timp.getCurrentSlice()).split("\n")[0], cell, frame), frame);
 			simp.setRoi(roi);
 			simp.updateAndDraw();
 		}
@@ -3781,7 +3807,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		private void fillStats() {
 			if(roi==null) return;
 			if(roi.getBounds().width<1 || roi.getBounds().height<1) return;
-			ImageProcessor ip=simp.getStack().getProcessor(simp.getStackIndex(ch, sl, fr));
+			ImageProcessor ip=simp.getStack().getProcessor(simp.getStackIndex(greench, sl, fr));
 			ip.setRoi(roi);
 			roi.setImage(simp);
 			ImageStatistics imgstat=ImageStatistics.getStatistics(ip, 127, cal);
@@ -3947,7 +3973,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					for(int j=0;j<directRois.size();j++) {
 						Roi temp=directRois.get(j);
 						if(temp!=null) {
-							if(DEBUG)IJ.log("Updatemask fr"+fr+" pt"+(i)+" roi"+j+" "+temp.getName());
+							if(DEBUG)IJ.log("Updatemask fr"+fr+" pt"+(i+1)+" roi"+(j+1)+" "+temp.getName());
 							if(DirectRoiTypes.ONLY_WITHIN.getString().equals(temp.getName())) {
 								tempMaskRoi=andRoi(tempMaskRoi,temp);
 								if(DEBUG)IJ.log("Updatemask updated tempMask");
@@ -3956,27 +3982,22 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					}
 				}
 				if(tempMaskRoi!=null){
-					if(!tempMaskRoi.equals(maskRoi[i])){
-						maskRoi[i]=tempMaskRoi;
-						mask[i]=ip.createProcessor(ip.getWidth(), ip.getHeight());
-						if(mask[i]==null) {
-							IJ.log("Error creating mask["+i+"] in frame "+fr);
-							continue;
+					maskRoi[i]=tempMaskRoi;
+					mask[i]=ip.createProcessor(ip.getWidth(), ip.getHeight());
+					if(mask[i]==null) {
+						IJ.log("Error creating mask["+i+"] in frame "+fr);
+						continue;
+					}
+					Rectangle mb=maskRoi[i].getBounds();
+					if(DEBUG)IJ.log("Updated "+fr+" maskRoi "+(i+1)+" to "+mb.x+","+mb.y+","+mb.width+","+mb.height);
+					Point[] pts=maskRoi[i].getContainedPoints();
+					for(int pi=0; pi<pts.length; pi++) {
+						Point p=pts[pi];
+						if(shouldStop.get()){
+							mask[i]=null;
+							return;
 						}
-						Rectangle mb=maskRoi[i].getBounds();
-						if(DEBUG)IJ.log("Updated "+fr+" maskRoi "+i+" to "+mb.x+","+mb.y+","+mb.width+","+mb.height);
-						final ImageProcessor mip=mask[i];
-						final Roi maskRoii=maskRoi[i];
-						if(mip==null) return;
-						for(int y=mb.y; y<(mb.y+mb.height); y++) {
-							for(int x=mb.x; x<(mb.x+mb.width); x++) {
-								if(shouldStop.get()){
-									mask[i]=null;
-									return;
-								}
-								if(maskRoii.contains(x,y))mip.putPixel(x, y, ip.get(x,y));
-							}
-						}
+						mask[i].set(p.x, p.y, ip.get(p.x, p.y));
 					}
 				}else{ 
 					mask[i]=ip;
@@ -3991,8 +4012,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		public void resetPoints() {
 			wandPoints=new ArrayList<WandPoint>();
 			for(int i=0;i<xys.size();i++) {
-				addPoint(xys.get(i));
+				WandPoint wp=xys.get(i);
+				wandPoints.add(new WandPoint(wp.point, wp.thresh, wp.isNeg));
 			}
+			updateMasks();
 			//maskRoi=new Roi[MAX_POINTS];
 			//mask=new ImageProcessor[MAX_POINTS];
 		}
@@ -4368,7 +4391,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					if(recalcZ){
 						if(i==0)currentz=z;
 						Roi ovalroi=new OvalRoi(x-r, y-r, 2*r, 2*r);
-						currentz=getClosestMaxZ(imp, ovalroi, chs>1?2:1, currentz, frm);
+						currentz=getClosestMaxZ(imp, ovalroi, chs>=greench?greench:1, currentz, frm);
 						if(currentz<0 || currentz>sls) currentz=z;
 						IJ.log("Recalculated Z for cell "+(cell+1)+" frame "+frm+": "+currentz);
 						rt.setValue(sliceind, i+(frms*cell), currentz);
