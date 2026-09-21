@@ -107,36 +107,49 @@ public class AJ_Misc_Plugins implements PlugIn {
 		imp.updateAndDraw();
 	}
 	
-	public static ImagePlus TProjector() {
-		return TProjector(null);
+	public static ImagePlus CZTProjector() {
+		return CZTProjector(null);
 	}
 	
-	public static ImagePlus TProjector(ImagePlus imp) {
+	public static ImagePlus CZTProjector(ImagePlus imp) {
 		if(imp==null) imp=WindowManager.getCurrentImage();
 		if(imp==null) {IJ.noImage(); return null;}
-		if(imp.getNFrames()<2) {IJ.error("Stack does not have multiple frames"); return null;}
-		boolean doallsls=true;
-		int method=1;
-		int stfr=1, endfr=imp.getNFrames();
+		if(imp.getStackSize()<2) {IJ.error("Stack does not have multiple dimensions"); return null;}
+		boolean doall=true;
+		int method=ij.plugin.ZProjector.MAX_METHOD;
+		int st=1, end=imp.getNFrames();
+		String def="Time";
+		if(end==1 && imp.getNChannels()>1){def="Channel"; end=imp.getNChannels();}
+		if(end==1 && imp.getNSlices()>1){def="Z"; end=imp.getNSlices();}
 		String[] METHODS=ij.plugin.ZProjector.METHODS;
-		GenericDialog gd=new GenericDialog("TProjector");
-		gd.addNumericField("Start Frame:", stfr);
-		gd.addNumericField("End Frame:", endfr);
+		GenericDialog gd=new GenericDialog("CZTProjector");
+		gd.addChoice("Which Dimension?",new String[] {"Time","Z","Channel"}, def);
+		gd.addNumericField("Start:", st);
+		gd.addNumericField("End:", end);
 		gd.addChoice("Mode",METHODS,METHODS[method]);
-		gd.addCheckbox("Do all Slices?", true);
+		gd.addCheckbox("Do all other dimensions?", true);
 		gd.showDialog();
 		if(gd.wasCanceled())return null;
-		stfr=(int)gd.getNextNumber();
-		endfr=(int)gd.getNextNumber();
+		String dim=gd.getNextChoice();
+		st=(int)gd.getNextNumber();
+		end=(int)gd.getNextNumber();
 		method=gd.getNextChoiceIndex();
-		doallsls=gd.getNextBoolean();
-		return TProjector(imp, method, doallsls, stfr, endfr);
+		doall=gd.getNextBoolean();
+		ImagePlus ret=null;
+		if(dim.equals("Time"))ret=TProjector(imp, method, doall, st, end);
+		else if(dim.equals("Z"))ret=ZProjector(imp, method, doall, st, end);
+		else if(dim.equals("Channel"))ret=CProjector(imp, method, doall, doall, st, end);
+		ret.show();
+		return ret;
 	}
 	
 	public static ImagePlus TProjector(ImagePlus imp, int method, boolean doallsls, int stfr, int endfr) {
 		if(imp==null) {IJ.noImage(); return null;}
 		int frms=imp.getNFrames(), chs=imp.getNChannels(),ufrms=endfr-stfr+1, frchs=ufrms*chs;
 		if(frms<2) {IJ.error("Stack does not have multiple frames"); return null;}
+		if(stfr<1)stfr=1;
+		if(endfr>frms)endfr=frms;
+		if(stfr>endfr) {IJ.error("Start frame must be less than end frame"); return null;}
 		
 		ImageStack oldis=imp.getImageStack();
 		ImageStack newis=new ImageStack(imp.getWidth(), imp.getHeight(), imp.getNChannels()*(doallsls?imp.getNSlices():1));
@@ -178,7 +191,48 @@ public class AJ_Misc_Plugins implements PlugIn {
 		}
 		endImage.setCalibration(imp.getCalibration());
 		ajs.tools.Slicelabel_Transfer.transferSliceLabels(imp, endImage);
-		endImage.show();
+		return endImage;
+	}
+
+	public static ImagePlus ZProjector(ImagePlus imp, int method, boolean doallfrms, int stsl, int endsl) {
+		return TwoPhotonImage.zProject(imp, stsl, endsl, doallfrms, method);
+	}
+
+	public static ImagePlus CProjector(ImagePlus imp, int method, boolean doallsls, boolean doallfrms, int stch, int endch) {
+		if(imp==null) {IJ.noImage(); return null;}
+		int frms=imp.getNFrames(), chs=imp.getNChannels(), sls=imp.getNSlices(), uchs=endch-stch+1;
+		if(chs<2) {IJ.error("Stack does not have multiple channels"); return null;}
+		if(stch<1)stch=1;
+		if(endch>chs)endch=chs;
+		if(stch>endch) {IJ.error("Start channel must be less than end channel"); return null;}
+		
+		ImageStack oldis=imp.getImageStack();
+		ImageStack newis=new ImageStack(imp.getWidth(), imp.getHeight(), (doallsls?sls:1)*(doallfrms?frms:1));
+		int stsl=doallsls?0:(imp.getZ()-1), endsl=doallsls?sls:imp.getZ();
+		int stfr=doallfrms?0:(imp.getT()-1), endfr=doallfrms?frms:imp.getT();
+		for(int fr=stfr; fr<endfr; fr++){
+			for(int z=stsl; z<endsl; z++) {
+				ImageStack imst=new ImageStack(imp.getWidth(), imp.getHeight(), uchs);
+				imst.update(imp.getProcessor());
+				for(int ch=(stch-1);ch<endch;ch++)
+					imst.setPixels(oldis.getProcessor(imp.getStackIndex(ch+1,z+1,fr+1)).getPixels(), ch-stch+2);
+				ImagePlus newimp=new ImagePlus("temp",imst);
+				ij.plugin.ZProjector zprojector=new ij.plugin.ZProjector(newimp);
+				zprojector.setMethod(method);
+				zprojector.setStartSlice(1);
+				zprojector.setStopSlice(uchs);
+				zprojector.doProjection();
+				ImagePlus projImage=zprojector.getProjection();
+				newis.setPixels(projImage.getProcessor().getPixels(),(fr-stfr)*sls+(z-stsl)+1);
+				projImage.changes=false; projImage.close();
+				newimp.changes=false; newimp.close();
+			}
+		}
+		String[] SMETHODS=new String[] {"AVG","MAX","MIN","SUM","SD","MEDIAN"};
+		ImagePlus endImage=new ImagePlus(imp.getTitle()+"-CProj"+SMETHODS[method],newis);
+		endImage.setDimensions(1, doallsls?sls:1, doallfrms?frms:1);
+		endImage.setCalibration(imp.getCalibration());
+		ajs.tools.Slicelabel_Transfer.transferSliceLabels(imp, endImage);
 		return endImage;
 	}
 	
@@ -1420,7 +1474,9 @@ public class AJ_Misc_Plugins implements PlugIn {
 		ImagePlus imp=WindowManager.getCurrentImage();
 		if(imp==null) return;
 		String title=imp.getTitle();
-		String dir=imp.getOriginalFileInfo().directory;
+		ij.io.FileInfo fi=imp.getOriginalFileInfo();
+		String dir=null;
+		if(fi!=null) dir=fi.directory;
 		int ch=0, sl=0;
 		GenericDialog gd=new GenericDialog("Cellpose Segment");
 		gd.addMessage("Cellpose Segment this file?:\n"+title);
