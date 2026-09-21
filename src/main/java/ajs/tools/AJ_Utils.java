@@ -1,7 +1,5 @@
 package ajs.tools;
 
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -329,6 +327,53 @@ public class AJ_Utils implements PlugIn{
 			tluts[i]=result;
 		}
 		return tluts;
+	}
+
+	static int getInfoLineIndex(String[] lines, String[] starts) {
+		if(lines==null || starts==null) return -1;
+		for(int i=0; i<lines.length; i++) {
+			for(int j=0; j<starts.length; j++) {
+				if(lines[i].startsWith(starts[j])) return i;
+			}
+		}
+		return -1;
+	}
+
+	static String getInfoLine(String info, String[] starts) {
+		if(info==null || starts==null) return null;
+		String[] lines=info.split("\n");
+		int i=getInfoLineIndex(lines, starts);
+		if(i>=0) return lines[i];
+		return null;
+	}
+
+	static int[] getInfoLineInts(String info, String[] starts) {
+		String line=getInfoLine(info, starts);
+		if(line==null) return null;
+		String[] parts=line.split(": ");
+		String[] nums=parts[parts.length-1].split(",");
+		int[] res=new int[nums.length];
+		for(int i=0; i<nums.length; i++) {
+			res[i]=parseIntTP(nums[i]);
+		}
+		return res;
+	}
+
+	static void setInfoLineInts(ImagePlus imp, String[] starts, int[] values) {
+		if(imp==null || starts==null || values==null) return;
+		String info=imp.getInfoProperty();
+		if(info==null) info="";
+		String[] lines=info.split("\n");
+		int i=getInfoLineIndex(lines, starts);
+		String newline=starts[0]+": "+Arrays.toString(values).replace("[", "").replace("]", "");
+		if(i>=0){
+			lines[i]=newline;
+			info=String.join("\n", lines);
+		}else{
+			if(!info.endsWith("\n") && !info.contentEquals("")) info+="\n";
+			info+=newline;
+		}
+		imp.setProperty("Info", info);
 	}
 	
 }
