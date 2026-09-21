@@ -51,8 +51,15 @@ else:
             if channel > img_st.shape[1]:
                 print(f"Supplied channel ({channel}) was out of range 1-{img_st.shape[1]}")
                 sys.exit()
-            print(f"Using channel {channel} out of {img_st.shape[1]}...")
-            img_st = img_st[:, channel-1, :, :]  # type: ignore[assignment]
+            if slice <= 0:
+                print(f"Using channel {channel} out of {img_st.shape[1]}...")
+                img_st = img_st[:, channel-1, :, :]  # type: ignore[assignment]
+            else:
+                if slice > img_st.shape[2]:
+                    print(f"Supplied Z ({slice}) was out of range 1-{img_st.shape[2]}")
+                    sys.exit()
+                print(f"Using channel {channel} and slice {slice}...")
+                img_st = img_st[slice-1, channel-1, :, :]  # type: ignore[assignment]
     else:
         if len(img_st.shape) == 3:
             if channel > 0 and slice > 0:
