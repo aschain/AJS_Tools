@@ -3688,7 +3688,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	}
 
 	private Roi addRoi(Roi roi, Roi addroi) {
-		if(roi==null) {roi=addroi; return roi;}
+		if(roi==null) {return addroi;}
 		if(addroi==null) {return roi;}
 		if(! (addroi instanceof ShapeRoi))addroi=new ShapeRoi(addroi);
 		if(! (roi instanceof ShapeRoi))roi=new ShapeRoi(roi);
@@ -3706,7 +3706,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	}
 
 	private Roi subtractRoi(Roi roi, Roi subroi) {
-		if(roi==null)return roi;
+		if(roi==null)return null;
 		if(subroi==null)return roi;
 		if(! (subroi instanceof ShapeRoi))subroi=new ShapeRoi(subroi);
 		if(! (roi instanceof ShapeRoi))roi=new ShapeRoi(roi);
@@ -4016,35 +4016,38 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				if(x+w>ip.getWidth()) {w=ip.getWidth()-x;}
 				if(y+h>ip.getHeight()) {h=ip.getHeight()-y;}
 				Roi defBounds=(xymaskmax>0)?new Roi(x, y, w, h):new Roi(0,0,ip.getWidth(), ip.getHeight());
-				Roi tempMaskRoi=null;
+				Roi tempMaskRoi=defBounds;
+				Roi addroi=null;
 				if(xys.get(i).directRois!=null) {
 					ArrayList<Roi> directRois=xys.get(i).directRois;
 					for(int j=0;j<directRois.size();j++) {
 						Roi temp=directRois.get(j);
-						if(temp!=null) {
+						if(temp!=null && DirectRoiTypes.ONLY_WITHIN.getString().equals(temp.getName())) {
 							if(DEBUG)IJ.log("Updatemask fr"+fr+" pt"+(i+1)+" roi"+(j+1)+" "+temp.getName());
-							if(DirectRoiTypes.ONLY_WITHIN.getString().equals(temp.getName())) {
-								tempMaskRoi=andRoi(tempMaskRoi,temp);
-								if(DEBUG)IJ.log("Updatemask updated tempMask");
-							}
+							if(tempMaskRoi==defBounds) tempMaskRoi=temp;
+							else tempMaskRoi=andRoi(tempMaskRoi,temp);
 						}
 					}
-					if(tempMaskRoi==null) tempMaskRoi=defBounds;
-					Rectangle tbs=tempMaskRoi.getBounds();
 					for(int j=0;j<directRois.size();j++) {
 						Roi temp=directRois.get(j);
-						if(temp!=null && !DirectRoiTypes.ONLY_WITHIN.getString().equals(temp.getName())) {
-							Rectangle b=temp.getBounds();
-							if(b.x<tbs.x) tbs.x=b.x;
-							if(b.y<tbs.y) tbs.y=b.y;
-							tbs.width=Math.max(tbs.x+tbs.width, b.x+b.width) - tbs.x;
-							tbs.height=Math.max(tbs.y+tbs.height, b.y+b.height) - tbs.y;
+						if(temp!=null) {
+							if(DirectRoiTypes.SUBTRACTIVE.getString().equals(temp.getName())) {
+								if(DEBUG)IJ.log("Updatemask fr"+fr+" pt"+(i+1)+" roi"+(j+1)+" "+temp.getName());
+								tempMaskRoi=subtractRoi(tempMaskRoi,temp);
+							}else if(DirectRoiTypes.ADDITIVE.getString().equals(temp.getName())) {
+								if(DEBUG)IJ.log("Updatemask fr"+fr+" pt"+(i+1)+" roi"+(j+1)+" "+temp.getName());
+								tempMaskRoi=addRoi(tempMaskRoi,temp);
+								addroi=addRoi(addroi, temp);
+							}
 						}
 					}
 				}
 				if(tempMaskRoi==null) tempMaskRoi=defBounds;
 				maskRoi[i]=tempMaskRoi;
-				if(!tempMaskRoi.equals(new Roi(0,0,ip.getWidth(), ip.getHeight()))) {
+				if(tempMaskRoi.equals(new Roi(0,0,ip.getWidth(), ip.getHeight()))) { 
+					mask[i]=ip;
+					//if(DEBUG)IJ.log("Updated maskRoi mask to full ip");
+				}else{
 					Rectangle mb=maskRoi[i].getBounds();
 					mask[i]=ip.createProcessor(mb.width, mb.height);
 					if(mask[i]==null) {
@@ -4075,37 +4078,14 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 							mask[i].set(p.x-mb.x, p.y-mb.y, ip.get(p.x, p.y));
 						}
 					}
-					ArrayList<Roi> directRois=xys.get(i).directRois;
-					int drsize=directRois==null?0:directRois.size();
-					for(int j=0;j<drsize;j++) {
-						Roi temp=directRois.get(j);
-						if(temp!=null) {
-							if(DirectRoiTypes.SUBTRACTIVE.getString().equals(temp.getName())) {
-								Point[] pts2=temp.getContainedPoints();
-								for(int k=0;k<pts2.length;k++) {
-									Point p=pts2[k];
-									mask[i].set(p.x-mb.x, p.y-mb.y, 0);
-								}
-							}else if(DirectRoiTypes.ADDITIVE.getString().equals(temp.getName())) {
-								Point[] pts2=temp.getContainedPoints();
-								
-								if(is32bit) {
-									for(int k=0;k<pts2.length;k++) {
-										Point p=pts2[k];
-											mask[i].setf(p.x-mb.x, p.y-mb.y, Float.MAX_VALUE);
-									}
-								}else {
-									for(int k=0;k<pts2.length;k++) {
-										Point p=pts2[k];
-											mask[i].set(p.x-mb.x, p.y-mb.y, ipMax);
-									}
-								}
-							}
+					if(addroi!=null){
+						Point[] pts2=addroi.getContainedPoints();
+						for(int k=0;k<pts2.length;k++) {
+							int px=pts2[k].x-mb.x, py=pts2[k].y-mb.y;
+							if(is32bit) mask[i].setf(px, py, Float.MAX_VALUE);
+							else mask[i].set(px, py, ipMax);
 						}
 					}
-				}else{ 
-					mask[i]=ip;
-					//if(DEBUG)IJ.log("Updated maskRoi mask to full ip");
 				}
 			}
 		}
