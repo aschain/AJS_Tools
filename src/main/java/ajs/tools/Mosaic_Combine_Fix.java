@@ -8,6 +8,7 @@ import ij.*;
 import ij.gui.*;
 import ij.process.ImageProcessor;
 import ij.process.Blitter;
+import ij.process.FloatProcessor;
 import ij.measure.ResultsTable;
 
 /**
@@ -18,7 +19,6 @@ import ij.measure.ResultsTable;
 public class Mosaic_Combine_Fix implements PlugIn {
 	
 	private static final int EWIDTH=1024;
-	private static final int LINE_AVE=10;
 	
 	/**
 	 * This method gets called by ImageJ / Fiji.
@@ -286,7 +286,7 @@ public class Mosaic_Combine_Fix implements PlugIn {
 		boolean snake=false;
 		int xmax=Math.sqrt(nImages)>0?((int)Math.sqrt(nImages)):1;
 		int ymax=(int)Math.ceil((double)nImages/xmax);
-		boolean writeToInfo=true;
+		boolean writeToInfo=false;
 		boolean findBrightestSlice=false;
 		GenericDialog gd=new GenericDialog("Mosaic Overlap Generator");
 		gd.addMessage("There are "+nImages+" stacks open.");
@@ -333,13 +333,9 @@ public class Mosaic_Combine_Fix implements PlugIn {
 				ImagePlus imp1=WindowManager.getImage(titles[i]);
 				ImagePlus imp2=WindowManager.getImage(titles[n]);
 				if(findBrightestSlice){
-					imp1.resetRoi();
-					double maxMean=0; int maxSlice=1;
-					for(int z=1; z<=imp1.getNSlices(); z++){
-						ImageProcessor ip=imp1.getStack().getProcessor(imp1.getStackIndex(imp1.getC(), z, imp1.getT()));
-						double mean=ij.process.ImageStatistics.getStatistics(ip, ij.process.ImageStatistics.MEAN, null).mean;
-						if(mean>maxMean){ maxMean=mean; maxSlice=z; }
-					}
+					Roi[] rois=getOverlapCropRegions(imp1, imp2, dirNames[d], xyOverlap);
+					if(rois==null) continue;
+					int maxSlice=getBrightestSlice(imp1, rois[0]);
 					imp1.setZ(maxSlice);
 					imp1.updateAndDraw();
 					imp2.setZ(maxSlice);
@@ -349,6 +345,18 @@ public class Mosaic_Combine_Fix implements PlugIn {
 			}
 		}
 		rt.show("Mosaic_Overlaps.csv");
+	}
+
+	private static int getBrightestSlice(ImagePlus imp, Roi roi){
+		if(roi!=null) imp.setRoi(roi);
+		else imp.resetRoi();
+		double maxMean=0; int maxSlice=0;
+		for(int z=1; z<=imp.getNSlices(); z++){
+			ImageProcessor ip=imp.getStack().getProcessor(imp.getStackIndex(imp.getC(), z, imp.getT()));
+			double mean=ij.process.ImageStatistics.getStatistics(ip, ij.process.ImageStatistics.MEAN, null).mean;
+			if(mean>maxMean){ maxMean=mean; maxSlice=z; }
+		}
+		return maxSlice;
 	}
 
 	private static ImageProcessor cropRegion(ImagePlus src, int x0, int y0, int w, int h){
@@ -379,8 +387,8 @@ public class Mosaic_Combine_Fix implements PlugIn {
 		return new ij.process.ColorProcessor(dstc.getImage());
 	}
 
-	private static void resolveMosaicOverlap(ImagePlus imp1, ImagePlus imp2, String direction, int overlap, ResultsTable rt, boolean writeToInfo){
-		int margin=Math.max(10, overlap/2);
+	private static Roi[] getOverlapCropRegions(ImagePlus imp1, ImagePlus imp2, String direction, int overlap){
+		int margin=Math.max(50, overlap/2);
 		int w1=imp1.getWidth(), h1=imp1.getHeight();
 		int w2=imp2.getWidth(), h2=imp2.getHeight();
 		int canvasW, canvasH, o1x, o1y, o2x, o2y;
@@ -405,8 +413,25 @@ public class Mosaic_Combine_Fix implements PlugIn {
 				o1x=-margin; o1y=-margin;
 				o2x=-margin; o2y=(h2-overlap)-margin;
 				break;
-			default: return;
+			default: return null;
 		}
+		Roi[] rois=new Roi[2];
+		rois[0]=new Roi(o1x, o1y, canvasW, canvasH);
+		rois[1]=new Roi(o2x, o2y, canvasW, canvasH);
+		return rois;
+	}
+
+	private static void resolveMosaicOverlap(ImagePlus imp1, ImagePlus imp2, String direction, int overlap, ResultsTable rt, boolean writeToInfo){
+		Roi[] rois=getOverlapCropRegions(imp1, imp2, direction, overlap);
+		if(rois==null) return;
+
+		int o1x=(int)rois[0].getBounds().getX();
+		int o1y=(int)rois[0].getBounds().getY();
+		int canvasW=(int)rois[0].getBounds().getWidth();
+		int canvasH=(int)rois[0].getBounds().getHeight();
+
+		int o2x=(int)rois[1].getBounds().getX();
+		int o2y=(int)rois[1].getBounds().getY();
 
 		final ImageProcessor[] ips=
 		{
@@ -414,16 +439,35 @@ public class Mosaic_Combine_Fix implements PlugIn {
 			cropRegion(imp2, o2x, o2y, canvasW, canvasH)
 		};
 
+		final int[] shift={0,0};
+		if(rt.getCounter()>0){
+			int n=0;
+			for(int i=0;i<rt.getCounter();i++){
+				String dir=rt.getStringValue("Direction", i);
+				if(dir.equals(direction)){
+					shift[0]+=(int)rt.getValue("X", i);
+					shift[1]+=(int)rt.getValue("Y", i);
+					n++;
+				}
+			}
+			shift[0]/=n; shift[1]/=n;
+			IJ.showStatus("Using previous shift: "+shift[0]+", "+shift[1]);
+		}
 		ImageStack stack=new ImageStack(canvasW, canvasH);
 		stack.addSlice(imp1.getTitle(), ips[0]);
-		stack.addSlice(imp2.getTitle(), ips[1]);
+		ImageProcessor shifted=ips[1].duplicate();
+		shifted.translate(shift[0], shift[1]);
+		stack.addSlice(imp2.getTitle(), shifted);
 		final ImagePlus tempImp=new ImagePlus("Overlap: "+imp1.getTitle()+" <-> "+imp2.getTitle()+" ("+direction+")", stack);
 		tempImp.show();
+		java.awt.Rectangle screen1=java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()[0].getDefaultConfiguration().getBounds();
+		java.awt.Window tempWin=tempImp.getWindow();
+		tempWin.setLocation(screen1.x+(screen1.width-tempWin.getWidth())/2, screen1.y+(screen1.height-tempWin.getHeight())/2);
+		
 		final ImageCanvas canvas=tempImp.getWindow().getCanvas();
-		//canvas.requestFocus();
+		canvas.requestFocus();
 		IJ.log("Beginning flipping...");
 
-		final int[] shift={0,0};
 		final boolean[] locked={false};
 		final javax.swing.Timer flipTimer=new javax.swing.Timer(600, e -> {
 			java.awt.EventQueue.invokeLater(() -> {
@@ -453,7 +497,12 @@ public class Mosaic_Combine_Fix implements PlugIn {
 						ips[0]=cropRegion(imp1, o1x, o1y, canvasW, canvasH);
 						ips[1]=cropRegion(imp2, o2x, o2y, canvasW, canvasH);
 						tempImp.getStack().setPixels(ips[0].getPixels(), 1);
-						tempImp.getStack().setPixels(ips[1].getPixels(), 2);
+						ImageProcessor shifted=ips[1].duplicate();
+						if(shift[0]!=0 || shift[1]!=0){
+							shifted.translate(shift[0], shift[1]);
+						}
+						tempImp.getStack().setPixels(shifted.getPixels(), 2);
+						tempImp.updateAndDraw();
 					}
 				}
 				if(changed){
@@ -479,7 +528,7 @@ public class Mosaic_Combine_Fix implements PlugIn {
 		tempImp.close();
 
 		int dx=shift[0], dy=shift[1];
-		int x, y;
+		int x, y, w1=imp1.getWidth(), h1=imp1.getHeight(), w2=imp2.getWidth(), h2=imp2.getHeight();
 		switch(direction){
 			case "right": x=w1-overlap+dx; y=dy; break;
 			case "left": x=overlap-w2+dx; y=dy; break;
@@ -645,14 +694,6 @@ public class Mosaic_Combine_Fix implements PlugIn {
 	public static void mosaicBrightnessAdjust(){
 		ImagePlus imp=WindowManager.getCurrentImage();
 		if(imp==null) {IJ.noImage(); return;}
-		ResultsTable rtx=ResultsTable.getResultsTable("xValues.csv");
-		ResultsTable rty=ResultsTable.getResultsTable("yValues.csv");
-		boolean useRt=false;
-		if(rtx!=null && rty!=null){
-			if(rtx.getCounter()>0 && rty.getCounter()>0){
-				useRt=true;
-			}
-		}
 		ArrayList<String> bmaps=new ArrayList<String>();
 		String[] titles=WindowManager.getImageTitles();
 		bmaps.add("None");
@@ -662,28 +703,56 @@ public class Mosaic_Combine_Fix implements PlugIn {
 			}
 		}
 		boolean isSingleImageMosaic=imp.getWidth()>2048;
+		
+		int xRepeatNumber=(int)Math.round((double)imp.getWidth()/EWIDTH);
+		int yRepeatNumber=(int)Math.round((double)imp.getHeight()/EWIDTH);
+		int oImageWidth=EWIDTH;
+		int oImageHeight=EWIDTH;
+		if(!isSingleImageMosaic){
+			oImageWidth=imp.getWidth();
+			oImageHeight=imp.getHeight();
+		}
 		String[] choices=new String[]{"Current Image is a Mosaic", "All Open Images will be the Mosaic"};
 		GenericDialog gd=new GenericDialog("Mosaic Brightness Adjust");
 		gd.addMessage("Current image: "+imp.getTitle()+" ("+imp.getWidth()+"x"+imp.getHeight()+")");
 		gd.addChoice("Image(s) to adjust?", choices, choices[isSingleImageMosaic?0:1]);
-		gd.addNumericField("Number of images in a row (x)?", 5, 0);
-		gd.addNumericField("Number of images in a column (y)?", 5, 0);
-		gd.addNumericField("Size of each image in pixels(0 means 2^ guess):", 0, 0);
-		gd.addChoice("Orientation", new String[]{"Horizontal", "Vertical", "Both"}, "Horizontal");
+		gd.addNumericField("Number of images in a row (x)?", xRepeatNumber, 0);
+		gd.addNumericField("Number of images in a column (y)?", yRepeatNumber, 0);
+		gd.addNumericField("Width of each image in pixels:", oImageWidth, 0);
+		gd.addNumericField("Height of each image in pixels:", oImageHeight, 0);
 		if(imp.getNChannels()>1) gd.addCheckbox("Calculate from all channels?", true);
 		if(imp.getNSlices()>1) gd.addCheckbox("Calculate from all slices?", true);
 		if(imp.getNFrames()>1) gd.addCheckbox("Calculate from all frames?", true);
 		if(imp.getNChannels()>1) gd.addCheckbox("Apply to all channels?", true);
 		if(imp.getNSlices()>1) gd.addCheckbox("Apply to all slices?", true);
 		if(imp.getNFrames()>1) gd.addCheckbox("Apply to all frames?", true);
-		if(useRt) gd.addCheckbox("Use Open Results Tables?", true);
 		if(bmaps.size()>1) gd.addChoice("Use Brightness Map Image?", bmaps.toArray(new String[bmaps.size()]), bmaps.get(0));
 		gd.addDialogListener(new DialogListener() {
 			public boolean dialogItemChanged(GenericDialog gdl, AWTEvent e){
 				boolean isSingleImageMosaic=(gdl.getNextChoiceIndex()==0);
+					int xRepeatNumber=(int)gdl.getNextNumber();
+					int yRepeatNumber=(int)gdl.getNextNumber();
 				if(isSingleImageMosaic){
 					((java.awt.TextField)gdl.getNumericFields().get(0)).setEnabled(true);
 					((java.awt.TextField)gdl.getNumericFields().get(1)).setEnabled(true);
+					if(e.getSource()==gdl.getNumericFields().get(0) || e.getSource()==gdl.getNumericFields().get(1)){
+						int owidth=2;
+						for(int i=0; i<13; i++){
+							if(owidth==1024) owidth=800;
+							else if(owidth==1600) owidth=1024;
+							if(owidth*xRepeatNumber>imp.getWidth()) break;
+							owidth*=2;
+						}
+						((java.awt.TextField)gdl.getNumericFields().get(2)).setText(""+owidth);
+						int oheight=2;
+						for(int i=0; i<13; i++){
+							if(oheight==1024) oheight=800;
+							else if(oheight==1600) oheight=1024;
+							if(oheight*yRepeatNumber>imp.getHeight()) break;
+							oheight*=2;
+						}
+						((java.awt.TextField)gdl.getNumericFields().get(3)).setText(""+oheight);
+					}
 				}else{
 					((java.awt.TextField)gdl.getNumericFields().get(0)).setEnabled(false);
 					((java.awt.TextField)gdl.getNumericFields().get(1)).setEnabled(false);
@@ -703,10 +772,10 @@ public class Mosaic_Combine_Fix implements PlugIn {
 		gd.showDialog();
 		if(gd.wasCanceled()) return;
 		isSingleImageMosaic=(gd.getNextChoiceIndex()==0);
-		int xRepeatNumber=(int)gd.getNextNumber();
-		int yRepeatNumber=(int)gd.getNextNumber();
-		int imageSize=(int)gd.getNextNumber();
-		int orientation=gd.getNextChoiceIndex();
+		xRepeatNumber=(int)gd.getNextNumber();
+		yRepeatNumber=(int)gd.getNextNumber();
+		oImageWidth=(int)gd.getNextNumber();
+		oImageHeight=(int)gd.getNextNumber();
 		boolean[] calcAll=new boolean[6];
 		if(imp.getNChannels()>1) calcAll[0]=gd.getNextBoolean();
 		if(imp.getNSlices()>1) calcAll[1]=gd.getNextBoolean();
@@ -714,7 +783,6 @@ public class Mosaic_Combine_Fix implements PlugIn {
 		if(imp.getNChannels()>1) calcAll[3]=gd.getNextBoolean();
 		if(imp.getNSlices()>1) calcAll[4]=gd.getNextBoolean();
 		if(imp.getNFrames()>1) calcAll[5]=gd.getNextBoolean();
-		if(useRt) useRt=gd.getNextBoolean();
 		ImagePlus bmap=null;
 		if(bmaps.size()>1) {
 			String title=gd.getNextChoice();
@@ -722,67 +790,31 @@ public class Mosaic_Combine_Fix implements PlugIn {
 				bmap=WindowManager.getImage(title);
 		}
 		if(isSingleImageMosaic)
-			mosaicBrightnessFix(imp, xRepeatNumber, yRepeatNumber, imageSize, orientation, calcAll, useRt);
+			mosaicBrightnessFix(imp, xRepeatNumber, yRepeatNumber, oImageWidth, oImageHeight, calcAll, bmap);
 		else
-			mosaicBrightnessFixImages(orientation, calcAll, useRt, bmap);
+			mosaicBrightnessFixImages(oImageWidth, oImageHeight, calcAll, bmap);
 	}
 
-	static final int HORIZONTAL=0, VERTICAL=1, BOTH=2;
 	static final int CALC_CH=0, CALC_SL=1, CALC_FR=2, APPLY_CH=3, APPLY_SL=4, APPLY_FR=5;
 
-	public static void mosaicBrightnessFix(ImagePlus imp, int xRepeatNumber, int yRepeatNumber, int imageSize, int orientation, boolean[] calcAll, boolean useOpenRt){
+	public static void mosaicBrightnessFix(ImagePlus imp, int xRepeatNumber, int yRepeatNumber, int oImageWidth, int oImageHeight, boolean[] calcAll, ImagePlus bmap){
 		if(imp==null) {IJ.noImage(); return;}
-		int owidth=imageSize;
-		if(owidth<=0){
-			owidth=2;
-			for(int i=0; i<13; i++){
-				if(owidth==1024) owidth=800;
-				else if(owidth==1600) owidth=1024;
-				if(owidth*xRepeatNumber>imp.getWidth()) break;
-				owidth*=2;
-			}
-		}
 		Roi roi = imp.getRoi();
 		if(roi==null) roi=new Roi(0,0,imp.getWidth(),imp.getHeight());
-		java.awt.Rectangle b=roi.getBounds();
 		int w=imp.getWidth();
 		int h=imp.getHeight();
-		int xoverlap=((owidth*xRepeatNumber)-w)/(xRepeatNumber-1);
-		int yoverlap=((owidth*yRepeatNumber)-h)/(yRepeatNumber-1);
-		int wov=owidth-xoverlap;
-		int hov=owidth-yoverlap;
-		IJ.log("MBA Start with "+owidth+"x"+owidth+" images for "+xRepeatNumber+" repeats, overlap: "+xoverlap+", "+wov+" pixels per image");
-		
-		double[] xadj=null, yadj=null;
-		double xmax=0, ymax=0;
+		int xoverlap=((oImageWidth*xRepeatNumber)-w)/(xRepeatNumber-1);
+		int yoverlap=((oImageHeight*yRepeatNumber)-h)/(yRepeatNumber-1);
+		int wov=oImageWidth-xoverlap;
+		int hov=oImageHeight-yoverlap;
+		IJ.log("MBA Start with "+oImageWidth+"x"+oImageHeight+" images for "+xRepeatNumber+" repeats, overlap: "+xoverlap+", "+wov+" pixels per image");
 
-		if(useOpenRt){
-			ResultsTable rtx=ResultsTable.getResultsTable("xValues.csv");
-			ResultsTable rty=ResultsTable.getResultsTable("yValues.csv");
-			if(rtx!=null){
-				if(rtx.getCounter()>=wov){
-					xadj=new double[wov];
-					for(int i=0; i<wov; i++){
-						xadj[i]=rtx.getValue("Value", i);
-					}
-				}
-			}
-			if(rty!=null){
-				if(rty.getCounter()>=wov){
-					yadj=new double[wov];
-					for(int i=0; i<wov; i++){
-						yadj[i]=rty.getValue("Value", i);
-					}
-				}
-			}
-		}
-
+		ImageProcessor bmapip=null;
 		ImagePlus calcimp=imp;
 
-		if((xadj==null && orientation!=VERTICAL) || (yadj==null && orientation!=HORIZONTAL)){
+		if(bmap==null){
 			
-			if(orientation==HORIZONTAL || orientation==BOTH) xadj=new double[wov];
-			if(orientation==VERTICAL || orientation==BOTH) yadj=new double[wov];
+			bmapip=new FloatProcessor(oImageWidth, oImageHeight);
 
 			if(calcAll[CALC_SL]){
 				calcimp=AJ_Misc_Plugins.ZProjector(calcimp, ij.plugin.ZProjector.MAX_METHOD, true, 1, imp.getNSlices());
@@ -805,54 +837,45 @@ public class Mosaic_Combine_Fix implements PlugIn {
 
 			ImageProcessor ip=calcimp.getProcessor();
 			boolean is32bit=calcimp.getBitDepth()==32;
-			if(xadj!=null){
-				for(int x=0; x<(wov*xRepeatNumber); x++){
+			double max=0;
+			for(int y=0; y<hov;y++){
+				for(int x=0; x<wov; x++){
 					double a=0;
-					if(is32bit){
-						for(int y=b.y; y<(b.y+b.height); y++){
-							a+=ip.getf(x,y);
-						}
-					}else{
-						for(int y=b.y; y<(b.y+b.height); y++){
-							a+=(double)ip.get(x,y);
+					int n=0;
+					for(int xr=0;xr<xRepeatNumber; xr++){
+						int x0=x+(xr*wov);
+						for(int yr=0;yr<yRepeatNumber; yr++){
+							int y0=y+(yr*hov);
+							if(is32bit){
+								a+=ip.getf(x0,y0);
+							}else{
+								a+=(double)ip.get(x0,y0);
+							}
+							n++;
 						}
 					}
-					a/=b.height;
-					xadj[x%wov]+=a;
-					if((x/wov)==(xRepeatNumber-1)){
-						xadj[x%wov]/=xRepeatNumber;
-					}
+					a/=n;
+					max=Math.max(max, a);
+					bmapip.setf(x,y, (float)a);
 				}
-				xadj=getLineAverage(xadj, LINE_AVE);
-				Plot plot=new Plot("xadj", "X", "Value");
-				plot.add("line", xadj);
-				plot.show();
 			}
-			if(yadj!=null){
-				for(int y=0; y<(wov*yRepeatNumber); y++){
-					double a=0;
-					for(int x=b.x; x<(b.x+b.width); x++){
-						if(is32bit){
-							a+=ip.getf(x,y);
-						}else{
-							a+=(double)ip.get(x,y);
-						}
-					}
-					a/=b.width;
-					yadj[y%hov]+=a;
-					if((y/hov)==(yRepeatNumber-1)){
-						yadj[y%hov]/=yRepeatNumber;
-					}
+
+			for(int y=0; y<hov;y++){
+				for(int x=0; x<wov; x++){
+					float a=bmapip.getf(x,y);
+					if(a>0) bmapip.setf(x,y, (float)(a/max));
 				}
-				yadj=getLineAverage(yadj, LINE_AVE);
-				Plot plot=new Plot("yadj", "Y", "Value");
-				plot.add("line", yadj);
-				plot.show();
 			}
+
+			//smooth the brightness map to reduce noise before it's used as a divisor
+			new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, 20);
+			new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, 20);
+			new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, 20);
+			
+			bmap= new ImagePlus("MosaicBrightnessMap", bmapip);
+			bmap.show();
 			if(calcimp!=imp)calcimp.close();
-		}
-		for(int i=0; i<xadj.length; i++) xmax=Math.max(xmax, xadj[i]);
-		for(int i=0; i<yadj.length; i++) ymax=Math.max(ymax, yadj[i]);
+		}else bmapip=bmap.getProcessor();
 		
 		IJ.log("MBA Adjusting...");
 		int slend=calcAll[APPLY_SL]?imp.getNSlices():imp.getZ(), slst=calcAll[APPLY_SL]?1:imp.getZ();
@@ -869,8 +892,7 @@ public class Mosaic_Combine_Fix implements PlugIn {
 						for(int x=0; x<(wov*xRepeatNumber); x++){
 							for(int y=0; y<imp.getHeight(); y++){
 								float value=sip.getf(x,y);
-								if(xadj!=null) value=(float)(value*(xmax/xadj[x%wov]));
-								if(yadj!=null) value=(float)(value*(ymax/yadj[y%hov]));
+								value=(float)(value/(bmapip.getf(x%wov,y%hov)));
 								sip.setf(x,y, value);
 							}
 						}
@@ -878,8 +900,7 @@ public class Mosaic_Combine_Fix implements PlugIn {
 						for(int x=0; x<(wov*xRepeatNumber); x++){
 							for(int y=0; y<imp.getHeight(); y++){
 								int value=sip.get(x,y);
-								if(xadj!=null) value=(int)(value*(xmax/xadj[x%wov]));
-								if(yadj!=null) value=(int)(value*(ymax/yadj[y%hov]));
+								value=(int)(value/(bmapip.getf(x%wov,y%hov)));
 								sip.set(x,y, value);
 							}
 						}
@@ -906,26 +927,13 @@ public class Mosaic_Combine_Fix implements PlugIn {
 		return values;
 	}
 
-	public static void mosaicBrightnessFixImages(int orientation, boolean[] calcAll, boolean useOpenRts, ImagePlus bmap){
+	public static void mosaicBrightnessFixImages(int imageWidth, int imageHeight, boolean[] calcAll, ImagePlus bmap){
 		int nImages=WindowManager.getImageCount();
 		String[] titles=WindowManager.getImageTitles();
-		ResultsTable rtx=null, rty=null;
-
-		if(useOpenRts){
-			rtx=ResultsTable.getResultsTable("xValues.csv");
-			rty=ResultsTable.getResultsTable("yValues.csv");
-		}
-		double[] xadj=null, yadj=null;
-		double xmax=0, ymax=0;
-		if(bmap==null && (rtx==null || rty==null)) {
-			boolean genX=(orientation==HORIZONTAL || orientation==BOTH);
-			boolean genY=(orientation==VERTICAL || orientation==BOTH);
-
-			if(!genX && !genY) {
-				IJ.log("No values to generate. Exiting.");
-				return;
-			}
-			double fullwidth=0, fullheight=0;
+		ImageProcessor bmapip=null;
+		double max=0;
+		if(bmap==null) {
+			bmapip=new FloatProcessor(imageWidth, imageHeight);
 			for(int i=0; i<nImages; i++){
 				ImagePlus imp=WindowManager.getImage(titles[i]);
 				if(imp==null) continue;
@@ -949,85 +957,33 @@ public class Mosaic_Combine_Fix implements PlugIn {
 					IJ.log("MBA CProjector for calcuation");
 				}
 				int width=calcimp.getWidth(), height=calcimp.getHeight();
-				fullheight+=height; fullwidth+=width;
-				if(i==0){xadj=new double[width]; yadj=new double[height];}
-				if(genX){
+				boolean is32bit=calcimp.getBitDepth()==32;
+				for(int y=0; y<height;y++){
 					for(int x=0; x<width; x++){
-						for(int y=0; y<height; y++){
-							xadj[x]+=calcimp.getProcessor().get(x,y);
+						double a=0;
+						if(is32bit){
+							a=calcimp.getProcessor().getf(x,y);
+						}else{
+							a=(double)calcimp.getProcessor().get(x,y);
 						}
-					}
-				}
-				if(genY){
-					for(int y=0; y<height; y++){
-						for(int x=0; x<width; x++){
-							yadj[y]+=calcimp.getProcessor().get(x,y);
+						bmapip.setf(x,y, (float)(bmapip.getf(x,y)+a));
+						if(i==(nImages-1)) {
+							bmapip.setf(x,y, (float)(bmapip.getf(x,y)/(double)nImages));
+							max=Math.max(max, a);
 						}
 					}
 				}
 				if(calcimp!=imp)calcimp.close();
 			}
-			if(genX){
-				for(int x=0; x<xadj.length; x++){
-					xadj[x]/=fullheight;
-				}
-				xadj=getLineAverage(xadj, LINE_AVE);
-				for(int x=0; x<xadj.length; x++){
-					if(xadj[x]>xmax) xmax=xadj[x];
-				}
-				ResultsTable rt=new ResultsTable();
-				for(int x=0; x<xadj.length; x++){
-					rt.incrementCounter();
-					rt.addValue("Value", xadj[x]);
-				}
-				rt.show("xValues.csv");
-				for(int i=0; i<rtx.getCounter(); i++){
-					xadj[i]=xmax/xadj[i];
+			for(int y=0; y<imageHeight;y++){
+				for(int x=0; x<imageWidth; x++){
+					float a=bmapip.getf(x,y);
+					bmapip.setf(x,y, (float)(a/max));
 				}
 			}
-			if(genY){
-				for(int y=0; y<yadj.length; y++){
-					yadj[y]/=fullwidth;
-				}
-				yadj=getLineAverage(yadj, LINE_AVE);
-				for(int y=0; y<yadj.length; y++){
-					if(yadj[y]>ymax) ymax=yadj[y];
-				}
-				ResultsTable rt=new ResultsTable();
-				for(int y=0; y<yadj.length; y++){
-					rt.incrementCounter();
-					rt.addValue("Value", yadj[y]);
-				}
-				rt.show("yValues.csv");
-				for(int i=0; i<rty.getCounter(); i++){
-					yadj[i]=ymax/yadj[i];
-				}
-			}
-		}else{
-			if(rtx!=null){
-				xadj=new double[rtx.getCounter()];
-				for(int i=0; i<rtx.getCounter(); i++){
-					xadj[i]=rtx.getValue("Value", i);
-					if(xadj[i]>xmax) xmax=xadj[i];
-				}
-				for(int i=0; i<rtx.getCounter(); i++){
-					xadj[i]=xmax/xadj[i];
-				}
-			}
-			if(rty!=null){
-				yadj=new double[rty.getCounter()];
-				for(int i=0; i<rty.getCounter(); i++){
-					yadj[i]=rty.getValue("Value", i);
-					if(yadj[i]>ymax) ymax=yadj[i];
-				}
-				for(int i=0; i<rty.getCounter(); i++){
-					yadj[i]=ymax/yadj[i];
-				}
-			}
-		}
+
+		}else bmapip=bmap.getProcessor();
 		
-		ImageProcessor bmapip=null;
-		if(bmap!=null) bmapip=bmap.getProcessor();
 		for(int i=0; i<nImages; i++){
 			ImagePlus imp=WindowManager.getImage(titles[i]);
 			if(imp==bmap) continue;
@@ -1035,12 +991,8 @@ public class Mosaic_Combine_Fix implements PlugIn {
 			int width=imp.getWidth(), height=imp.getHeight();
 			boolean is32bit=imp.getBitDepth()==32;
 			double factorX=1.0, factorY=1.0;
-			if(xadj!=null && xadj.length!=width) factorX=(double)xadj.length/(double)width;
-			if(yadj!=null && yadj.length!=height) factorY=(double)yadj.length/(double)height;
-			if(bmapip!=null){
-				factorX=(double)bmapip.getWidth()/(double)width;
-				factorY=(double)bmapip.getHeight()/(double)height;
-			}
+			factorX=(double)width/(double)bmapip.getWidth();
+			factorY=(double)height/(double)bmapip.getHeight();
 			int slend=calcAll[APPLY_SL]?imp.getNSlices():imp.getZ(), slst=calcAll[APPLY_SL]?1:imp.getZ();
 			int frend=calcAll[APPLY_FR]?imp.getNFrames():imp.getT(), frst=calcAll[APPLY_FR]?1:imp.getT();
 			int chend=calcAll[APPLY_CH]?imp.getNChannels():imp.getC(), chst=calcAll[APPLY_CH]?1:imp.getC();
@@ -1049,30 +1001,20 @@ public class Mosaic_Combine_Fix implements PlugIn {
 				for(int z=slst; z<=slend; z++){
 					for(int c=chst; c<=chend; c++){
 						ImageProcessor ip=imp.getStack().getProcessor(imp.getStackIndex(c,z,t));
-						if(is32bit){
-							for(int x=0; x<width; x++){
-								for(int y=0; y<height; y++){
-									float value=ip.getf(x,y);
-									if(xadj!=null) value=(float)(value*(xadj[(int)(x*factorX)]));
-									if(yadj!=null) value=(float)(value*(yadj[(int)(y*factorY)]));
-									if(bmapip!=null){
-										float bval=bmapip.getf(x,y);
-										value/=bval;
-									}
-									ip.setf((int)(x*factorX),(int)(y*factorY), value);
+						for(int x=0; x<width; x++){
+							for(int y=0; y<height; y++){
+								float value;
+								if(is32bit){
+									value=ip.getf(x,y);
+								}else{
+									value=(float)ip.get(x,y);
 								}
-							}
-						}else{
-							for(int x=0; x<width; x++){
-								for(int y=0; y<height; y++){
-									int value=ip.get(x,y);
-									if(xadj!=null) value=(int)(value*(xadj[(int)(x*factorX)]));
-									if(yadj!=null) value=(int)(value*(yadj[(int)(y*factorY)]));
-									if(bmapip!=null){
-										float bval=bmapip.getf(x,y);
-										value=(int)(value/bval);
-									}
-									ip.set((int)(x*factorX),(int)(y*factorY), value);
+								float bval=bmapip.getf((int)(x*factorX),(int)(y*factorY));
+								value/=bval;
+								if(is32bit){
+									ip.setf(x,y, value);
+								}else{
+									ip.set(x,y, (int)value);
 								}
 							}
 						}
