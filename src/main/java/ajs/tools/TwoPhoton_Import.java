@@ -161,7 +161,7 @@ public class TwoPhoton_Import implements PlugIn {
 		GenericDialog gd=new GenericDialog("2P-Import Options");
 		gd.addMessage("Continuous Import");
 		gd.addCheckbox("Set up Webpage?", false);
-		gd.addCheckbox("Set up Monitor IFTTT website?", false);
+		gd.addCheckbox("Set up a webhook for live monitoring?", false);
 		
 		gd.addMessage("Other");
 		gd.addCheckbox("Move images when opened", Prefs.get("AJ.TwoPhoton_Import.dopos", true));
@@ -176,8 +176,10 @@ public class TwoPhoton_Import implements PlugIn {
 			if(IJ.showMessageWithCancel("Set up Webpage","Change web root folder?\n"+TwoPhotonImage.webpath)) TwoPhotonImage.setUpWebpage();
 		}
 		if(gd.getNextBoolean()) {
-			GenericDialog sgd=new GenericDialog("IFTTT Webhook");
-			sgd.addStringField("When monitoring continuous 2p, the alarm can send\n a webhook to a website if you like:", Prefs.get("AJ.TwoPhoton_Import.alarmwebhook", ""));
+			GenericDialog sgd=new GenericDialog("Monitor Webhook");
+			sgd.addMessage("When monitoring continuous 2p, the alarm can send a webhook to a website if you like:");
+			sgd.addStringField("URL:", Prefs.get("AJ.TwoPhoton_Import.alarmwebhook", ""));
+			((java.awt.TextField)sgd.getStringFields().get(0)).setColumns(60);
 			sgd.showDialog();
 			if(!sgd.wasCanceled()) {
 				String wh=sgd.getNextString();
