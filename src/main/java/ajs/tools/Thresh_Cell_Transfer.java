@@ -30,7 +30,7 @@ import java.io.InputStreamReader;
  * (be it that it does not require any, or that it lets the user
  * choose more than one image in a dialog).
  */
-public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener, MouseWheelListener {
+public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener, MouseWheelListener, MouseMotionListener {
 
 	private final static String version="1.5.0";
 	private static boolean DEBUG=false;
@@ -77,7 +77,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		}
 	}
 	//private final static double AREATOLERANCE=0.2;
-	private final static int MAX_POINTS=8;
+	private final static int MAX_POINTS=5;
 	private final static Color addColor=new Color(0,255,0), subColor=new Color(255,0,0), onlyColor=new Color(128,64,255);
 	private final static int[] WHEELFACTORS= new int[] {1, 10, 30, 100};
 	public static enum DirectRoiTypes{ 
@@ -100,21 +100,21 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	private boolean drawCellLabel=false;
 	private boolean autoAccept=false;
 	private boolean checkZmax=true;
-	private AtomicBoolean[] buttonpress=new AtomicBoolean[]{new AtomicBoolean(false), new AtomicBoolean(false), new AtomicBoolean(false)};
-	private AtomicBoolean altWasDown=new AtomicBoolean(false), shiftWasDown=new AtomicBoolean(false), 
+	final private AtomicBoolean[] buttonpress=new AtomicBoolean[]{new AtomicBoolean(false), new AtomicBoolean(false), new AtomicBoolean(false)};
+	final private AtomicBoolean altWasDown=new AtomicBoolean(false), shiftWasDown=new AtomicBoolean(false), 
 							spacepress=new AtomicBoolean(false), acceptedROI=new AtomicBoolean(false);
 	private boolean[] postFirstAccept=new boolean[MAX_POINTS];
 	//private boolean showEachPointRoi=true;
 	private boolean autoSave=true;
 	private int pointIndex=0;
-	private ArrayList<WandPoint> xys=new ArrayList<WandPoint>();
+	final private ArrayList<WandPoint> xys=new ArrayList<WandPoint>();
 	private int curX=-1, curY=-1;
 	private int labelsl=0, celln=1;
 	private int wheelfactori = 1;
 	private int MYLUT=ImageProcessor.RED_LUT;
 	private ImagePlus simp, timp, ajtctcpimp=null;
 	private String title, endtitle, basetitle;
-	private ArrayList<String> cellLabels=new ArrayList<String>();
+	final private ArrayList<String> cellLabels=new ArrayList<String>();
 	private String cellLabel="Unlabeled";
 	private AutoWandRoi[] curWand;
 	private double[] threshMultiplier=null;
@@ -122,7 +122,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	private Thread[] updateCurWandThreads=null;
 	private TctTextWindow results;
 	private enum TctLines{
-		CURRENTWAND, CURRENTCELL, LASTACCEPTED, CURRENTPOINT, FRAMESLEFT, FRAMESWAND, EXTRA;
+		CURRENTCELL, FRAMESLEFT, CURRENTWAND, LASTACCEPTED, FRAMESWAND, EXTRA, CURRENTPOINT;
 	}
 	private double[] times;
 	private AtomicBoolean shouldStop=new AtomicBoolean(), threshChanged=new AtomicBoolean(false), 
@@ -140,6 +140,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	private boolean syncWindows=true, fullZ=false;
 	private int[] ccr2frames=null;
 	private AtomicInteger recalcABV=new AtomicInteger(0);
+	private boolean setLocations=ij.Prefs.get("AJTCT.setLocations", true);
 
 	public void run(String arg) {
 		if(arg.contentEquals("getClosestMaxZ")){
@@ -291,6 +292,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		ImageCanvas ic = simp.getCanvas();
 		ic.disablePopupMenu(true);
 		ic.addMouseListener(this);
+		ic.addMouseMotionListener(this);
 		ic.removeKeyListener(IJ.getInstance());
 		ic.addKeyListener(this);
 
@@ -346,6 +348,13 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			if(mls[i].getClass().getName().startsWith("Thresh_Cell")){
 				ic.removeMouseListener(mls[i]);
 				IJ.log("Removed old mL"+mls[i]);
+			}
+		}
+		MouseMotionListener[] mmls=ic.getMouseMotionListeners();
+		for(int i=0;i<mmls.length;i++) {
+			if(mmls[i].getClass().getName().startsWith("Thresh_Cell")){
+				ic.removeMouseMotionListener(mmls[i]);
+				IJ.log("Removed old mmL"+mmls[i]);
 			}
 		}
 		MouseWheelListener[] mwls=siw.getMouseWheelListeners();
@@ -552,6 +561,27 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		});  
 		tctpanel.setVisible(true);
 
+		if(setLocations){
+			java.awt.GraphicsDevice screen1 = simp.getWindow().getGraphicsConfiguration().getDevice();
+			java.awt.GraphicsDevice screen2 = screen1;
+			java.awt.GraphicsDevice[] screens = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices();
+			if(screens.length>1) {
+				if(screens[0]==screen1)screen2=screens[1];
+				else screen2=screens[0];
+			}
+			Rectangle s1b=screen1.getDefaultConfiguration().getBounds();
+			Rectangle s2b=screen2.getDefaultConfiguration().getBounds();
+			simp.getWindow().setLocation(s1b.x+s1b.width/4-simp.getWindow().getWidth()/2, s1b.y+s1b.height/2-simp.getWindow().getHeight()/2);
+			timp.getWindow().setLocation(s1b.x+s1b.width*3/4-timp.getWindow().getWidth()/2, s1b.y+s1b.height/2-timp.getWindow().getHeight()/2);
+			results.rtw.setLocation(s2b.x+5, s2b.y+5);
+			results.rtw.setSize(s2b.width-30, s2b.y+s2b.height/2-5);
+			java.awt.Window logw=WindowManager.getWindow("Log");
+			if(logw!=null) {
+				logw.setLocation(s2b.x+5, s2b.y+s2b.height/2);
+				logw.setSize(s2b.width/2-10, (s2b.height/2)-5);
+			}
+		}
+
 		//Initialize loop variables
 		simp.setC(greench);
 		int sl=simp.getSlice(), fr=simp.getFrame();
@@ -574,6 +604,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 
 		setupAJTCTcp();
 		int importFromAllRoisLine=0;
+		Roi.setColor(DEF_ROI_COLOR);
 
 		//-------loop-------------
 		//main loop
@@ -585,6 +616,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				xys.clear();
 				pointIndex=0;
 				tctpanel.resetWP();
+				printCurrentPointsInfo();
 
 				for(int i=0;i<MAX_POINTS;i++) {
 					postFirstAccept[i]=false;
@@ -824,13 +856,17 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					}
 					if(!postFirstAccept[pointIndex])updateCurWands(false, false, true);
 					else updateCurWands(false, true, true);
-					tctpanel.setTextLine(TctLines.CURRENTPOINT, "Point:"+(pointIndex+1)+" x:"+curX+" y:"+curY+" z:"+sl+" fr:"+fr);
+					//tctpanel.setTextLine(TctLines.CURRENTPOINT, "Point:"+(pointIndex+1)+" x:"+curX+" y:"+curY+" z:"+sl+" fr:"+fr);
+					printCurrentPointsInfo();
 				}
 				if(WindowManager.getWindow(title)==null || WindowManager.getWindow(endtitle)==null) {IJ.log("Window Closed"); done=true;}
 				if(done) {cleanup(); return;}
 				if(((spacepress.get()) || buttonpress[2].get()))IJ.wait(10);
 				//if(DEBUG)IJ.log("\\Update:"+System.nanoTime()/1000000+"  xy:"+xy.x+" "+xy.y+" aa"+autoAccept+" probable"+(curWand[fr-1]==null?"NA":""+curWand[fr-1].probable)+" rc:"+buttonpress[2]+" gb:"+goback);
-				if(curX!=-1 && curY!=-1 && autoAccept && curWand[fr-1].probable && ((spacepress.get() && !buttonpress[0].get()) || buttonpress[2].get())){acceptedROI.set(true);}
+				if(curX!=-1 && curY!=-1 && autoAccept && curWand[fr-1].probable && 
+					((spacepress.get() && !buttonpress[0].get()) || buttonpress[2].get())){
+						acceptedROI.set(true);
+				}
 				//if((auto||!firsthit) && x!=-1 && y!=-1 && !firsttime)acceptedROI=true; else IJ.wait(200);
 				
 				//go to closest zmax if z key is pressed
@@ -1003,6 +1039,24 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		cleanup();
 	}
 
+	private void printCurrentPointsInfo(){
+		for(int i=0; i<MAX_POINTS; i++) {
+			if(i>=xys.size()) {
+				tctpanel.setTextLine(TctLines.CURRENTPOINT.ordinal()+i, "");
+			}else{
+				WandPoint wp=xys.get(i);
+				String pr="Point:"+(i+1)+" "+(pointIndex==i?"(current)":"")+" x:"+wp.getX()+" y:"+wp.getY();
+				ArrayList<Roi> rois=wp.directRois;
+				if(rois!=null && rois.size()>0) {
+					for(int j=0;j<rois.size();j++) {
+						pr+=" DROI"+(j+1)+"-"+rois.get(j).getName();
+					}
+				}
+				tctpanel.setTextLine(TctLines.CURRENTPOINT.ordinal()+i, pr);
+			}
+		}
+	}
+
 	private String buildLine(HashMap<HEADINGS, Object> data) {
 		String[] line=new String[HEADINGS.length()];
 		for(int i=0;i<line.length;i++) {
@@ -1164,6 +1218,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				ImageWindow siw=simp.getWindow();
 				ic.removeKeyListener(this);
 				ic.removeMouseListener(this);
+				ic.removeMouseMotionListener(this);
 				siw.removeMouseWheelListener(this);
 				siw.addMouseWheelListener(siw);
 				ic.disablePopupMenu(false);
@@ -1876,7 +1931,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		private Choice whichPoint;
 		private Choice whichlabel;
 		public CheckboxMenuItem autosavecbmi;
-		private String[] lines=new String[TctLines.values().length];
+		private String[] lines=new String[TctLines.values().length+MAX_POINTS-1];
 
 		public TCTPanel() {
 			super("TCT Control Panel version "+version);
@@ -2429,6 +2484,16 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		 */
 		public void setTextLine(TctLines tctline, String text) {
 			int line=tctline.ordinal();
+			setTextLine(line, text);
+		}
+
+		public void setTextLine(int line, String text){
+			if(lines.length<=line){
+				String[] linetemp=new String[line+1];
+				for(int i=0;i<lines.length;i++)linetemp[i]=lines[i];
+				for(int i=lines.length;i<linetemp.length;i++)linetemp[i]="";
+				lines=linetemp;
+			};
 			if(!lines[line].contentEquals(text)) {
 				lines[line]=text;
 				ta.setText(String.join("\n", lines));
@@ -3002,7 +3067,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		
 		int fr=simp.getT()-1;
 		if(curWand[fr]!=null){
-			curWand[fr].updateMasks();
+			curWand[fr].resetPoints();
 			curWand[fr].updateWandRoi();
 			updateCurWands(false, false, false);
 		}
@@ -3069,6 +3134,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		directRois.remove(ind);
 		int fr=simp.getT()-1;
 		if(curWand[fr]!=null){
+			curWand[fr].resetPoints();
 			curWand[fr].updateWandRoi();
 		}
 		updateCurWands(false, false, false);
@@ -3305,7 +3371,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		if(showAllRoi!=null){
 			showAllRoi.setStrokeColor(Color.cyan);
 			soverlay.add(showAllRoi);
-			simp.updateAndDraw();
+			//simp.updateAndDraw();
 		}
 	}
 
@@ -3436,99 +3502,118 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 
 	public void actionPerformed(ActionEvent event){ 
 		if(DEBUG)IJ.log("Button pressed"); 
-	} 
+	}
+
+	final Point xyPress=new Point(-1,-1);
+	final AtomicBoolean wasDragged=new AtomicBoolean(false);
 
 	public void mousePressed(MouseEvent e) { 
 		if(IJ.spaceBarDown() || addDirectRoi) return;
 		// || e.getButton()==MouseEvent.BUTTON2
-		if((IJ.altKeyDown() || IJ.shiftKeyDown() && e.getButton()==MouseEvent.BUTTON1)) {
+		int flags = e.getModifiersEx();
+		Point xy = simp.getCanvas().getCursorLoc();
+		if(DEBUG) IJ.log("buttonPressed: "+(((flags&InputEvent.BUTTON1_DOWN_MASK)!=0)?"1":"")+(((flags&InputEvent.BUTTON2_DOWN_MASK)!=0)?"2":"")+(((flags&InputEvent.BUTTON3_DOWN_MASK)!=0)?"3":"")+" "+e.getID());
+		if(DEBUG) IJ.log("flags: "+flags+" Mask1: "+InputEvent.BUTTON1_DOWN_MASK+" Mask2: "+InputEvent.BUTTON2_DOWN_MASK+" Mask3: "+InputEvent.BUTTON3_DOWN_MASK);
+		if((flags & InputEvent.BUTTON1_DOWN_MASK) !=0){
+			xyPress.setLocation(xy);
+			buttonpress[0].set(true);
 			if(IJ.altKeyDown() )altWasDown.set(true);
 			if(IJ.shiftKeyDown())shiftWasDown.set(true);
 			IJ.setKeyUp(KeyEvent.VK_ALT);
 			IJ.setKeyUp(KeyEvent.VK_SHIFT);
-			DirectRoiTypes rtype=DirectRoiTypes.ADDITIVE;
-			// || e.getButton()==MouseEvent.BUTTON2
-			if(shiftWasDown.get() && altWasDown.get())rtype=DirectRoiTypes.ONLY_WITHIN;
-			else if(altWasDown.get())rtype=DirectRoiTypes.SUBTRACTIVE;
-			beginDirectRoi(rtype);
-			MouseEvent newe=new MouseEvent(simp.getCanvas(), e.getID(), e.getWhen(), e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), e.getX(), e.getY(), e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
-			simp.getCanvas().mousePressed(newe);
-			e.consume();
-			return;
-		}
-		int flags = e.getModifiersEx();
-		if(DEBUG) IJ.log("flags: "+flags+" Mask1: "+InputEvent.BUTTON1_DOWN_MASK+" Mask2: "+InputEvent.BUTTON2_DOWN_MASK+" Mask3: "+InputEvent.BUTTON3_DOWN_MASK);
-		if(DEBUG) IJ.log("buttonPressed: "+(((flags&InputEvent.BUTTON1_DOWN_MASK)!=0)?"1":"")+(((flags&InputEvent.BUTTON2_DOWN_MASK)!=0)?"2":"")+(((flags&InputEvent.BUTTON3_DOWN_MASK)!=0)?"3":""));
-		if((flags & InputEvent.BUTTON1_DOWN_MASK) !=0){
-			Point xy = simp.getCanvas().getCursorLoc(); //because x,y position isn't exactly x,y in image
-			curX=xy.x; curY=xy.y;
-			if(DEBUG) IJ.log("Position: "+xy.x+" "+xy.y);
-			buttonpress[0].set(true);
 		}
 		if((flags & InputEvent.BUTTON2_DOWN_MASK) !=0) {
 			buttonpress[1].set(true);
-			simp.resetRoi();
-			timp.resetRoi();
-			if(importingFromAllRois) {
-				acceptedROI.set(true);
-			}
+			xyPress.setLocation(xy);
 		}
 		if((flags & InputEvent.BUTTON3_DOWN_MASK) !=0) {buttonpress[2].set(true); acceptedROI.set(true);}
+		e.consume();
+	}
+
+	public void mouseMoved(MouseEvent e) {
 	}
 	
 	public void mouseDragged(MouseEvent e) {
-		// || e.getButton()==MouseEvent.BUTTON2
-		if((altWasDown.get() || shiftWasDown.get() && e.getButton()==MouseEvent.BUTTON1)) {
-			MouseEvent newe=new MouseEvent(simp.getCanvas(), e.getID(), e.getWhen(), e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), e.getX(), e.getY(), e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
+		int flags = e.getModifiersEx();
+		if(DEBUG) IJ.log("\\Update:buttonDragged: "+(((flags&InputEvent.BUTTON1_DOWN_MASK)!=0)?"1":"")+(((flags&InputEvent.BUTTON2_DOWN_MASK)!=0)?"2":"")+(((flags&InputEvent.BUTTON3_DOWN_MASK)!=0)?"3":"")+" "+e.getID());
+		if((flags&InputEvent.BUTTON1_DOWN_MASK) !=0) {
+			if(xyPress.x>=0 && xyPress.y>=0) {
+				DirectRoiTypes rtype=DirectRoiTypes.ONLY_WITHIN;
+				if(shiftWasDown.get())rtype=DirectRoiTypes.ADDITIVE;
+				else if(altWasDown.get())rtype=DirectRoiTypes.SUBTRACTIVE;
+				if(shiftWasDown.get() && altWasDown.get())rtype=DirectRoiTypes.ONLY_WITHIN;
+				beginDirectRoi(rtype);
+				final MouseEvent newe=new MouseEvent(simp.getCanvas(), java.awt.event.MouseEvent.MOUSE_PRESSED, e.getWhen(), 
+					e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), 
+					simp.getCanvas().screenX(xyPress.x), simp.getCanvas().screenY(xyPress.y), 
+					e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
+				simp.getCanvas().mousePressed(newe);
+				xyPress.setLocation(-1,-1);
+				if(DEBUG) IJ.log("Drag start - Direct ROI started");
+			}
+			MouseEvent newe=new MouseEvent(simp.getCanvas(), e.getID(), e.getWhen(), 
+				e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), 
+				e.getX(), e.getY(), e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
 			simp.getCanvas().mouseDragged(newe);
-			e.consume();
 		}
+		if((flags&InputEvent.BUTTON2_DOWN_MASK) !=0) {
+			Rectangle sr=simp.getCanvas().getSrcRect();
+			Point srmid=new Point(sr.x+(sr.width/2), sr.y+(sr.height/2));
+			Point xy=simp.getCanvas().getCursorLoc();
+			int dx=xyPress.x-xy.x;
+			int dy=xyPress.y-xy.y;
+			xyPress.setLocation(xy);
+			setSrcRectAtPoint(new Point(srmid.x+dx, srmid.y+dy));
+		}
+		e.consume();
+		wasDragged.set(true);
 	}
 	
 	public void mouseReleased(MouseEvent e) {
 		if(addDirectRoi) return;
-		/**
-		if(IJ.altKeyDown() || IJ.shiftKeyDown()) {
-			int fr=simp.getT();
-			if(curWand[fr-1]!=null && simp.getRoi()!=null) {
-				Roi roi=simp.getRoi();
-				//roi=ij.plugin.RoiEnlarger.enlarge(ij.plugin.RoiEnlarger.enlarge(roi,3),-3);
-				curWand[fr-1].setRoi(roi);
-				curWand[fr-1].showBoth();
-			}
-			return;
-		}
-		**/
-		// || e.getButton()==MouseEvent.BUTTON2
-		if(altWasDown.get() || shiftWasDown.get() && e.getButton()==MouseEvent.BUTTON1) {
-			if(DEBUG) IJ.log("alt or shift release");
-			MouseEvent newe=new MouseEvent(simp.getCanvas(), e.getID(), e.getWhen(), e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), e.getX(), e.getY(), e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
-			simp.getCanvas().mouseReleased(newe);
-			Roi roi=simp.getRoi();
-			if(xys.size()<=pointIndex || xys.get(pointIndex)==null) {
-				xys.add(new WandPoint(null, 0, false));
-				if(DEBUG) IJ.log("added new wand point to xys for direct roi");
-			}
-			int index=xys.get(pointIndex).getDirectRoiSize()-1;
-			if(index<0)index=0;
-			DirectRoiTypes rtype=DirectRoiTypes.ADDITIVE;
-			// || e.getButton()==MouseEvent.BUTTON2
-			if(shiftWasDown.get() && altWasDown.get())rtype=DirectRoiTypes.ONLY_WITHIN;
-			else if(altWasDown.get())rtype=DirectRoiTypes.SUBTRACTIVE;
-			completeDirectRoi(rtype,index,roi, true);
-			altWasDown.set(false);
-			shiftWasDown.set(false);
-		}
 		if(DEBUG) IJ.log("buttonReleased: "+e.getModifiersEx()+" button: "+e.getButton());
-		if(e.getButton()==MouseEvent.BUTTON1)buttonpress[0].set(false);
+		Point xy=simp.getCanvas().getCursorLoc();
+		if(e.getButton()==MouseEvent.BUTTON1) {
+			if(xyPress.x==xy.x && xyPress.y==xy.y && !altWasDown.get() && !shiftWasDown.get()) {
+				curX=xy.x; curY=xy.y;
+				IJ.log("Set curXY to "+curX+","+curY);
+			} else {
+				if(DEBUG) IJ.log("alt or shift release");
+				MouseEvent newe=new MouseEvent(simp.getCanvas(), e.getID(), e.getWhen(), e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), e.getX(), e.getY(), e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
+				simp.getCanvas().mouseReleased(newe);
+				Roi roi=simp.getRoi();
+				if(xys.size()<=pointIndex || xys.get(pointIndex)==null) {
+					xys.add(new WandPoint(null, 0, false));
+					if(DEBUG) IJ.log("added new wand point to xys for direct roi");
+				}
+				int index=xys.get(pointIndex).getDirectRoiSize()-1;
+				if(index<0)index=0;
+				DirectRoiTypes rtype=DirectRoiTypes.ONLY_WITHIN;
+				if(shiftWasDown.get())rtype=DirectRoiTypes.ADDITIVE;
+				else if(altWasDown.get())rtype=DirectRoiTypes.SUBTRACTIVE;
+				completeDirectRoi(rtype,index,roi, true);
+				altWasDown.set(false);
+				shiftWasDown.set(false);
+			}
+			buttonpress[0].set(false);
+		}
 		if(e.getButton()==MouseEvent.BUTTON2) {
-		//	IJ.run("Previous Slice [<]");
 			buttonpress[1].set(false);
+			if(!wasDragged.get()) {
+				simp.resetRoi();
+				timp.resetRoi();
+				if(importingFromAllRois) {
+					acceptedROI.set(true);
+				}
+			}
 		}
 		if(e.getButton()==MouseEvent.BUTTON3) {
 			buttonpress[2].set(false);
 			//else{acceptedROI=true;}
 		}
+		e.consume();
+		wasDragged.set(false);
+		xyPress.setLocation(-1,-1);
 	} 
 	public void mouseExited(MouseEvent e) {} 
 	public void mouseClicked(MouseEvent e) {}	
@@ -4202,22 +4287,24 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		}
 
 		public void showBoth() {
-			if(roi!=null) {
-				if(showingBoth.compareAndSet(false, true)){
-					if(simp.getRoi()!=roi){
-						simp.setRoi(roi);
-						timp.setRoi((Roi)roi.clone());
-					}
-					try {
-						java.awt.EventQueue.invokeLater(new Runnable(){ public void run(){showingBoth.set(false);} });
-					} catch(Exception ex) {}
-				}else{
-					if(DEBUG)IJ.log("showBoth: already showingBoth");
-				}
-				tctpanel.setTextLine(TctLines.CURRENTPOINT, "Selection Info--  Roi changed: "+((roi.equals(curWand[fr-1].troi))?"no":"YES")+
-						" Accepted: "+accepted+" Probable: "+probable+" Points: "+wandPoints.size());
-				tctpanel.setTextLine(TctLines.CURRENTWAND, getInfoString());
+			if(roi==null) {
+				tctpanel.setTextLine(TctLines.EXTRA, "Selection Info--  Roi changed: No Selection");
+				return;
 			}
+			if(showingBoth.compareAndSet(false, true)){
+				if(simp.getRoi()!=roi){
+					simp.setRoi(roi);
+					timp.setRoi((Roi)roi.clone());
+				}
+				try {
+					java.awt.EventQueue.invokeLater(new Runnable(){ public void run(){showingBoth.set(false);} });
+				} catch(Exception ex) {}
+			}else{
+				if(DEBUG)IJ.log("showBoth: already showingBoth");
+			}
+			tctpanel.setTextLine(TctLines.EXTRA, "Selection Info--  Roi changed: "+((roi.equals(curWand[fr-1].troi))?"no":"YES")+
+					" Accepted: "+accepted+" Probable: "+probable+" Points: "+wandPoints.size());
+			tctpanel.setTextLine(TctLines.CURRENTWAND, getInfoString());
 		}
 		
 		public void accept() {
