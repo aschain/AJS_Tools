@@ -441,16 +441,27 @@ public class Mosaic_Combine_Fix implements PlugIn {
 
 		final int[] shift={0,0};
 		if(rt.getCounter()>0){
-			int n=0;
+			int n=0, x=0, y=0;
 			for(int i=0;i<rt.getCounter();i++){
 				String dir=rt.getStringValue("Direction", i);
 				if(dir.equals(direction)){
-					shift[0]+=(int)rt.getValue("X", i);
-					shift[1]+=(int)rt.getValue("Y", i);
+					x+=(int)rt.getValue("X", i);
+					y+=(int)rt.getValue("Y", i);
 					n++;
 				}
 			}
-			shift[0]/=n; shift[1]/=n;
+			if(n>0){
+				x/=n; y/=n;
+				int dx=0, dy=0;
+				int w1=imp1.getWidth(), h1=imp1.getHeight(), w2=imp2.getWidth(), h2=imp2.getHeight();
+				switch(direction){
+					case "right": dx=x-w1+overlap; dy=y; break;
+					case "left": dx=x-overlap+w2; dy=y; break;
+					case "bottom": dx=x; dy=y-h1+overlap; break;
+					case "top": dx=x; dy=y-overlap+h2; break;
+				}
+				shift[0]=dx; shift[1]=dy;
+			}
 			IJ.showStatus("Using previous shift: "+shift[0]+", "+shift[1]);
 		}
 		ImageStack stack=new ImageStack(canvasW, canvasH);
@@ -460,7 +471,8 @@ public class Mosaic_Combine_Fix implements PlugIn {
 		stack.addSlice(imp2.getTitle(), shifted);
 		final ImagePlus tempImp=new ImagePlus("Overlap: "+imp1.getTitle()+" <-> "+imp2.getTitle()+" ("+direction+")", stack);
 		tempImp.show();
-		java.awt.Rectangle screen1=java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()[0].getDefaultConfiguration().getBounds();
+
+		java.awt.Rectangle screen1=imp1.getWindow().getGraphicsConfiguration().getDevice().getDefaultConfiguration().getBounds();
 		java.awt.Window tempWin=tempImp.getWindow();
 		tempWin.setLocation(screen1.x+(screen1.width-tempWin.getWidth())/2, screen1.y+(screen1.height-tempWin.getHeight())/2);
 		
