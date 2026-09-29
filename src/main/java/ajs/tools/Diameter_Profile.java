@@ -1,6 +1,7 @@
 package ajs.tools;
 import ij.plugin.PlugIn;
 import ij.text.TextWindow;
+import ij.measure.Calibration;
 import ij.measure.ResultsTable;
 import ij.*;
 import ij.gui.*;
@@ -15,6 +16,7 @@ public class Diameter_Profile implements PlugIn {
 
 	final String[] THRESHLEVELS=new String[] {"Mean","Median","Mid","Top 1/3"};
 	final static int ianglemax=5;
+	final static int AVE_IS_DARK=3;
 	
 	
 	/**
@@ -29,25 +31,62 @@ public class Diameter_Profile implements PlugIn {
 		int rfd=3;
 		
 		ImagePlus imp=WindowManager.getCurrentImage();
-		int sl=imp.getSlice(), fr=imp.getFrame(), frms=imp.getNFrames(),chs=imp.getNChannels(), ch=imp.getC();
-		String title=imp.getTitle();
+		if(imp==null) {
+			IJ.noImage();
+			return;
+		}
 		Roi roi=imp.getRoi();
+		if(roi==null) {
+			IJ.error("Please select an ROI first, like a line across a blood vessel");
+			return;
+		}
+		int sl=imp.getSlice(), sls=imp.getNSlices(), fr=imp.getFrame(), frms=imp.getNFrames(),chs=imp.getNChannels(), ch=imp.getC();
+		boolean slicestack=false;
+		if(frms==1 && sls>1) {
+			slicestack=true;
+			frms=sls;
+		}
+		String title=imp.getTitle();
 		int stype=roi.getType();
+		if(stype!=Roi.LINE && stype!=Roi.POLYLINE && stype!=Roi.FREELINE && stype!=Roi.RECTANGLE) {
+			IJ.error("Diameter Profile requires a line (at 90 degrees), polyline (along the vessel), or rectangle ROI");
+			return;
+		}
+		boolean isDark=false;
+		if(stype==Roi.LINE){
+			ProfilePlot ptpp=new ProfilePlot(imp);
+			double[] ptp=ptpp.getProfile();
+			if(ptp.length>(AVE_IS_DARK*3)) {
+				double edge=0, center=0;
+				for(int i=0; i<AVE_IS_DARK;i++) {
+					edge+=ptp[i]+ptp[ptp.length-1-i];
+					center+=ptp[ptp.length/2-1+i];
+				}
+				edge/=(AVE_IS_DARK*2);
+				center/=AVE_IS_DARK;
+				if(edge>center)isDark=true;
+			}
+		}
 		double strokeWidth = roi.getStrokeWidth();
 		int ianglejump=1;
 		String tool=IJ.getToolName();
+
+		int[] ints=AJ_Utils.getInfoLineInts(imp.getInfoProperty(), new String[]{"Event at", "CSD at"});
+		int eventFrame=0;
+		if(ints!=null && ints.length>0)eventFrame=ints[0];
 		
 		GenericDialog gd=new GenericDialog("Diameter Profile");
 		gd.addChoice("Thresh level:", THRESHLEVELS, Prefs.get("AJ.Diameter_Profile.threshlevel", "Mean"));
-		gd.addCheckbox("Vessel is dark?", false);
+		gd.addCheckbox("Vessel is dark?", isDark);
 		if(stype==Roi.RECTANGLE)gd.addCheckbox("Vertical?",false);
 		if(stype==Roi.LINE ||stype==Roi.POLYLINE || stype==Roi.FREELINE)gd.addNumericField("Widen line (averaging)", strokeWidth, 0);
 		if(stype==Roi.POLYLINE || stype==Roi.FREELINE) {
 			gd.addNumericField("Skip every n along line", ianglejump, 0);
 		}
-		if(chs>1)gd.addStringField("Channels:",""+imp.getChannel());
+		if(chs>1)gd.addStringField("Channel:",""+imp.getChannel());
 		gd.addNumericField("Diameter running ave:",rfd,0);
-		gd.addCheckbox("CSD Summary?",false);
+		if(eventFrame==0) gd.addNumericField("Set Event frame?", 0, 0);
+		gd.addCheckbox("Summarize?",false);
 		gd.showDialog();
 		
 		if(gd.wasCanceled())return;
@@ -59,6 +98,7 @@ public class Diameter_Profile implements PlugIn {
 		if(stype==Roi.RECTANGLE)vertical=gd.getNextBoolean();
 		if(stype==Roi.LINE||stype==Roi.POLYLINE || stype==Roi.FREELINE) {
 			strokeWidth=gd.getNextNumber();
+			if(strokeWidth<1)strokeWidth=1;
 			roi.setStrokeWidth(strokeWidth);
 			roi.updateWideLine((int)strokeWidth);
 			if(stype==Roi.POLYLINE || stype==Roi.FREELINE)ianglejump=(int)gd.getNextNumber();
@@ -68,29 +108,39 @@ public class Diameter_Profile implements PlugIn {
 			imp.setPosition(ch,sl,fr);
 		}
 		int myrfd=(int)gd.getNextNumber();
+		if(eventFrame==0) {
+			eventFrame=(int)gd.getNextNumber();
+			if(eventFrame>0) {
+				AJ_Utils.setInfoLineInts(imp, new String[]{"Event at"}, new int[]{eventFrame});
+			}
+		}
 		boolean csdSummary=gd.getNextBoolean();
 		Prefs.savePreferences();
 	  
 		double[] times=new double[frms];
 		double frint=0;
-		frint=imp.getCalibration().frameInterval;
+		double px=1;
+		Calibration cal=imp.getCalibration();
 		String[] headings=null;
-		if(frint>0){
+		if(cal!=null && cal.frameInterval>0) {
+			frint=cal.frameInterval;
 			headings=new String[3];
-			String timeunit=imp.getCalibration().getTimeUnit();
+			String timeunit=cal.getTimeUnit();
 			headings[1]="Frame ("+timeunit+")";
 			headings[2]="Diameter";
-			times=Time_Extractor.extractTimes(imp, false, Time_Extractor.SubTime.EVENT_SET);
+			times=Time_Extractor.extractTimes(imp, slicestack, Time_Extractor.SubTime.EVENT_NO_SET);
 		}else {
 			headings=new String[2];
 			headings[1]="Diameter";
 		}
 		headings[0]="Frame";
+
+		if(cal!=null && cal.pixelWidth>0){
+			px=cal.pixelWidth;
+			headings[headings.length-1]+=" ("+cal.getUnit()+")";
+		}
 		
 		double[][] tp=new double[frms][];
-		int[][] diameterResult=new int[frms][];
-		diameterResult[0]=new int[] {-1,-1};
-		
 		ProfilePlot tpp;
 		int xMax=0,xAveMax=0;
 		
@@ -106,8 +156,11 @@ public class Diameter_Profile implements PlugIn {
 			}
 		}
 		
+		
+		
 		for(int k=0;k<frms;k++){
-			imp.setPosition(ch,sl,k+1);
+			if(slicestack) imp.setPosition(ch,k+1,fr);
+			else imp.setPosition(ch,sl,k+1);
 			while(IJ.spaceBarDown()) IJ.wait(300);
 			
 			if(stype==Roi.RECTANGLE) {
@@ -156,28 +209,25 @@ public class Diameter_Profile implements PlugIn {
 		wfu.show();
 		if(wfu.escPressed())return;
 
-		TextWindow table=new TextWindow(title+"-diameters",String.join("\t", headings), "",500,300);
-		table.setVisible(true);
-		ResultsTable drt=table.getResultsTable();
+		String tabletitle=title+"-diameters";
+		ResultsTable drt=new ResultsTable();
 		int[] thresh=new int[xAveMax];
 		int di=frint>0?2:1;
 		for(int k=0;k<frms;k++){
-			int start=-1,end=-1,diameter=0;
+			int diameter=0;
 			for(int x=0;x<xAveMax;x++) {
 				thresh[x]=ip.get(x,k);
 				if(thresh[x]==255)diameter++;
-				if(start==-1 && x>(myrfd+1) && (thresh[x-1]+thresh[x])/2==255)start=x-1-myrfd;
 			}
 			diameter+=2*myrfd;
-			end=start+diameter;
-			diameterResult[k]=new int[] {start,end};
-			drt.setValue(0, drt.getCounter(), k+1);
+			int n=drt.getCounter();
+			drt.setValue(headings[0], n, k+1);
 			if(frint>0) {
-				drt.setValue(1, drt.getCounter(), times[k]);
+				drt.setValue(headings[1], n, times[k]);
 			}
-			drt.setValue(di, drt.getCounter(), diameter);
+			drt.setValue(headings[headings.length-1], n, diameter*px);
 		}
-		drt.updateResults();
+		drt.show(tabletitle);
 		
 		if(frms>1) {
 			Plot plot=new Plot("Diameter over time","Time","Diameter");
@@ -206,8 +256,10 @@ public class Diameter_Profile implements PlugIn {
 				for(int i=dmax;i<diameters.length;i++) {
 					if(diameters[i]<aveBaseFinal) {dendDilation=i;break;}
 				}
-				double starttime=times[dstart];
-				for(int i=0;i<times.length;i++)times[i]-=starttime;
+				if(dstart>=0){
+					double starttime=times[dstart];
+					for(int i=0;i<times.length;i++)times[i]-=starttime;
+				}
 			}
 			plot.setColor("black");
 			plot.add(plottype,times,diameters);
@@ -227,7 +279,7 @@ public class Diameter_Profile implements PlugIn {
 					drt.setValue("CSDTime", i, times[i]);
 					drt.setValue("Norm Diameter", i, diameters[i]/aveBase);
 				}
-				drt.updateResults();
+				drt.show(tabletitle);
 			}
 			plot.show();
 			
