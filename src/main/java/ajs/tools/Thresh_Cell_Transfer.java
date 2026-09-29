@@ -23,6 +23,8 @@ import java.io.BufferedReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.PrintStream;
+import java.io.File;
 
 
 /**
@@ -159,6 +161,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			getCoveredArea();
 			return;
 		}
+		if(arg.contentEquals("runExternalCellpose")){
+			runExternalCellpose();
+			return;
+		}
 		if(arg.contentEquals("fullz"))fullZ=true;
 		TCT(WindowManager.getCurrentImage());
 	}
@@ -268,9 +274,9 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		if(spath.contentEquals("")) {IJ.error("Please save source image");return false;}
 
 		if(ajtctcpimp==null){
-			java.io.File[] files = new java.io.File(spath).listFiles();
+			File[] files = new File(spath).listFiles();
 			if(files!=null) {
-				for(java.io.File f : files) {
+				for(File f : files) {
 					if(f.getName().endsWith("-AJTCTcp.tif")) {
 						YesNoCancelDialog ync=new YesNoCancelDialog(null, "AJTCTcp Found", "Use "+f.getName()+" image as AJTCTcp?");
 						if(ync.cancelPressed()) break;
@@ -307,7 +313,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		IJ.setBackgroundColor(0,0,0);
 		IJ.setTool(ij.gui.Toolbar.FREEROI);
 		for(String roifilename : new String[] {"axon.roi","duraBV.roi","piaBV.roi", "bv.roi", "bv-dura.roi", "bv-pia.roi", "dura-bv.roi", "pia-bv.roi"}) {
-			java.io.File roifile=new java.io.File(spath+roifilename);
+			File roifile=new File(spath+roifilename);
 			if(roifile.exists()){
 				RoiManager rm=RoiManager.getRoiManager();
 				RoiDecoder rd = new RoiDecoder(spath+roifilename);
@@ -1003,7 +1009,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					if(autoSave) {
 						boolean dosave=true;
 						if(cellLabel.equals("Dura") && celln==1 && !editing) {
-							if((new java.io.File(spath+timp.getTitle())).exists()) {
+							if((new File(spath+timp.getTitle())).exists()) {
 								YesNoCancelDialog ync=new YesNoCancelDialog(null,"File Exists","AJTCT file already exists, ok to overwrite?\n(Otherwise autosave will be turned off)");
 								if(!ync.yesPressed()) {
 									autoSave=false;
@@ -4445,6 +4451,103 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			rt.save(path);
 			IJ.log("Saved Covered Area measurements to: "+path);
 		}
+	}
+
+	public static void runExternalCellpose(){
+		String pythonPath=Prefs.get("AJ.cellposePythonPath", "");
+		String tempdir=IJ.getDirectory("temp");
+		String scriptPath=tempdir + "getCellposeAJTCT.py";
+		if(!(new File(pythonPath)).exists()){
+			IJ.showMessage("Please find cellpose3 python executable (the python.exe in your cellpose environment)");
+			pythonPath=IJ.getFilePath("Find cellpose3 python executable (the python.exe in your cellpose environment)");
+			if(pythonPath==null || pythonPath.isEmpty()) return;
+			Prefs.set("AJ.cellposePythonPath", pythonPath);
+		}
+		try {
+			PrintStream ps=new PrintStream(scriptPath);
+			BufferedReader reader = new BufferedReader(new InputStreamReader(AJ_Misc_Plugins.class.getClassLoader().getResource("getCellposeAJTCT.py").openStream()));
+			String contents="";
+			String adder=reader.readLine();
+			while(adder!=null) {
+				contents+=adder+"\n";
+				adder=reader.readLine();
+			}
+			ps.print(contents);
+			ps.close();
+		}catch(Exception e) {
+				IJ.error("Error: Could not write getCellposeAJTCT.py file "+e.getMessage());
+				return;
+		}
+		ImagePlus imp=WindowManager.getCurrentImage();
+		if(imp==null) return;
+		String title=imp.getTitle();
+		ij.io.FileInfo fi=imp.getOriginalFileInfo();
+		String dir=null;
+		if(fi!=null) dir=fi.directory;
+		int ch=0, sl=0;
+		GenericDialog gd=new GenericDialog("Cellpose Segment");
+		gd.addMessage("Cellpose Segment this file?:\n"+title);
+		if(imp.getNChannels()>1){
+			String[] chs=new String[imp.getNChannels()];
+			for(int i=0; i<imp.getNChannels(); i++)chs[i]=""+(i+1);
+			gd.addChoice("Cellpose channel to segment:", chs, chs[1]);
+		}
+		if(imp.getNSlices()>1){
+			String[] sls=new String[imp.getNSlices()];
+			for(int i=0; i<imp.getNSlices(); i++)sls[i]=""+(i+1);
+			gd.addChoice("Cellpose slice to segment:", sls, sls[imp.getZ()-1]);
+		}
+		gd.showDialog();
+		if(imp.getNChannels()>1)
+			ch = gd.getNextChoiceIndex() + 1;
+		if(imp.getNSlices()>1)
+			sl = gd.getNextChoiceIndex() + 1;
+		if(gd.wasCanceled())return;
+		if(!title.endsWith(".tif")) title=title+".tif";
+		if(dir==null || dir.isEmpty()){
+			IJ.log("Dir empty trying macro");
+			IJ.runMacro("getInfo(\"image.directory\")");
+			String log=IJ.getLog();
+			if(log!=null){
+				String[] lines=log.split("\n");
+				dir=lines[lines.length-1].trim();
+				if(dir.startsWith("Dir empty"))dir=null;
+			}
+		}
+		boolean tempSave=false;
+		if(dir==null || dir.isEmpty()){
+			dir=IJ.getDirectory("temp")+"ijcellpose"+File.separator;
+			(new File(dir)).mkdir();
+			IJ.saveAs("tiff", dir+title);
+			IJ.log("Saved image to "+dir+title);
+			tempSave=true;
+		}
+		String inputPath=(dir+title).replace("\\", "/");
+		IJ.log("Running command: "+pythonPath+" "+scriptPath+" on input:");
+		IJ.log(inputPath);
+		ProcessBuilder pb = new ProcessBuilder(pythonPath,scriptPath,inputPath, ""+ch, ""+sl);
+		try {
+			Process p = pb.start();
+			BufferedReader b = new BufferedReader(new InputStreamReader(p.getInputStream()));
+			String line = "";
+			while ((line = b.readLine()) != null) {
+				IJ.log(line);
+			}
+			b.close();
+			p.waitFor();
+		} catch (Exception ex) {
+			ex.printStackTrace();
+		}
+		String outputPath=inputPath.substring(0,inputPath.length()-4)+"-AJTCTcp.tif";
+		outputPath=outputPath.replace("/","\\");
+		IJ.wait(500);
+		if((new File(outputPath)).exists()){ 
+			IJ.open(outputPath);
+			IJ.run("glasbey inverted");
+			IJ.log("Cellpose output completed.");
+			if(tempSave) WindowManager.getCurrentImage().changes=true;
+			else IJ.save(outputPath);
+		}else IJ.log("Error could not find AJTCTcp output file: "+outputPath);
 	}
 
 	public void ptReslice() {
