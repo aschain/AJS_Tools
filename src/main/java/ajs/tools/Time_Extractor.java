@@ -199,10 +199,11 @@ public class Time_Extractor implements PlugIn {
 		long frint=(long)(imp.getCalibration().frameInterval*1000);
 		if(frint==0)frint=1;
 		String[] labels=imp.getImageStack().getSliceLabels();
-		long currtime, offsettime=-1;
+		long currtime, offsettime=0;
 		int partframe,prevpartframe=0;
 		int endsls=dosls?sls:1;
 		double[] result=new double[dosls?(frms*sls):frms];
+		boolean isOlympus=false;
 		
 		for(int i=0;i<frms;i++) {
 			for(int j=0;j<endsls;j++) {
@@ -235,8 +236,10 @@ public class Time_Extractor implements PlugIn {
 					if(sind>-1) {
 						partframe=getSframe(slinfo[sind]);
 						prevpartframe=partframe;
+						if((!isOlympus) && (i>1))IJ.log("s_ missing from frames previous to: "+(i+1));
+						isOlympus=true;
 					} else {
-						IJ.log("s_ missing from frame: "+(i+1));
+						if(isOlympus) IJ.log("s_ missing from frame: "+(i+1));
 						partframe=(++prevpartframe);
 					}
 					currtime=(partframe-1)*frint;
