@@ -710,7 +710,7 @@ public class Mosaic_Combine_Fix implements PlugIn {
 		String[] titles=WindowManager.getImageTitles();
 		bmaps.add("None");
 		for(int i=0; i<titles.length; i++){
-			if(titles[i].contains("MosaicCondensed") || titles[i].contains("MosaicBrightnessMap")){
+			if(titles[i].contains("MosaicCondensed") || titles[i].contains("Mosaic_Brightness_Map")){
 				bmaps.add(titles[i]);
 			}
 		}
@@ -884,7 +884,7 @@ public class Mosaic_Combine_Fix implements PlugIn {
 			new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, 20);
 			new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, 20);
 			
-			bmap= new ImagePlus("MosaicBrightnessMap", bmapip);
+			bmap= new ImagePlus("Mosaic_Brightness_Map", bmapip);
 			bmap.show();
 			if(calcimp!=imp)calcimp.close();
 		}else bmapip=bmap.getProcessor();
@@ -993,7 +993,8 @@ public class Mosaic_Combine_Fix implements PlugIn {
 					bmapip.setf(x,y, (float)(a/max));
 				}
 			}
-
+			bmap= new ImagePlus("Mosaic_Brightness_Map", bmapip);
+			bmap.show();
 		}else bmapip=bmap.getProcessor();
 		
 		for(int i=0; i<nImages; i++){
