@@ -577,8 +577,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			}
 			Rectangle s1b=screen1.getDefaultConfiguration().getBounds();
 			Rectangle s2b=screen2.getDefaultConfiguration().getBounds();
-			simp.getWindow().setLocation(s1b.x+s1b.width/4-simp.getWindow().getWidth()/2, s1b.y+s1b.height/2-simp.getWindow().getHeight()/2);
-			timp.getWindow().setLocation(s1b.x+s1b.width*3/4-timp.getWindow().getWidth()/2, s1b.y+s1b.height/2-timp.getWindow().getHeight()/2);
+			if(simp.getWindow().getWidth()<s1b.width/2){
+				simp.getWindow().setLocation(s1b.x+s1b.width/2-simp.getWindow().getWidth()-5, s1b.y+s1b.height/2-simp.getWindow().getHeight()/2);
+				timp.getWindow().setLocation(s1b.x+s1b.width/2+5, s1b.y+s1b.height/2-timp.getWindow().getHeight()/2);
+			}
 			results.rtw.setLocation(s2b.x+5, s2b.y+5);
 			results.rtw.setSize(s2b.width-30, s2b.y+s2b.height/2-5);
 			java.awt.Window logw=WindowManager.getWindow("Log");
@@ -3582,7 +3584,6 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		if(e.getButton()==MouseEvent.BUTTON1) {
 			if(xyPress.x==xy.x && xyPress.y==xy.y && !altWasDown.get() && !shiftWasDown.get()) {
 				curX=xy.x; curY=xy.y;
-				IJ.log("Set curXY to "+curX+","+curY);
 			} else {
 				if(DEBUG) IJ.log("alt or shift release");
 				MouseEvent newe=new MouseEvent(simp.getCanvas(), e.getID(), e.getWhen(), e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), e.getX(), e.getY(), e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
@@ -4364,6 +4365,9 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					IJ.showMessage("Converting AJTCT to 16-bit image because > 255 cells");
 					(new StackConverter(timp)).convertToGray16();
 					timp.setProperty("Info", results.getText(true));
+					ist=timp.getImageStack();
+					tip1=ist.getProcessor(timp.getStackIndex(1, labelsl, fr));
+					tip2=ist.getProcessor(timp.getStackIndex(2, labelsl, fr));
 				}
 				tip1.setRoi(troi);
 				ImageStatistics imgstat=ImageStatistics.getStatistics(tip1, 127, timp.getCalibration());
@@ -4371,7 +4375,6 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				tip1.fill(troi);
 				tip1.setColor(0);
 				tip1.draw(ij.plugin.RoiEnlarger.enlarge(troi,1));
-				tip1.setColor(255);
 
 				String cl=""+celln;
 				if(drawCellLabel)cl=cl.concat(" "+cellLabel);
