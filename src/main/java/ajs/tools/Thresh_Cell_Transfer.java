@@ -588,6 +588,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				logw.setLocation(s2b.x+5, s2b.y+s2b.height/2);
 				logw.setSize(s2b.width/2-10, (s2b.height/2)-5);
 			}
+			timp.getWindow().toFront();
+			simp.getWindow().toFront();
 		}
 
 		//Initialize loop variables
@@ -720,7 +722,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					for(int i=1;i<frms;i++) {
 						if(curWand[i]!=null)curWand[i].accept();
 					}
-					if(!reconfirming)ignoreCellComplete=true;
+					if(!reconfirming && frms>1)ignoreCellComplete=true;
 				}
 
 				//lastfr=-1;
@@ -871,8 +873,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				if(done) {cleanup(); return;}
 				if(((spacepress.get()) || buttonpress[2].get()))IJ.wait(10);
 				//if(DEBUG)IJ.log("\\Update:"+System.nanoTime()/1000000+"  xy:"+xy.x+" "+xy.y+" aa"+autoAccept+" probable"+(curWand[fr-1]==null?"NA":""+curWand[fr-1].probable)+" rc:"+buttonpress[2]+" gb:"+goback);
-				if(curX!=-1 && curY!=-1 && autoAccept && curWand[fr-1].probable && 
-					((spacepress.get() && !buttonpress[0].get()) || buttonpress[2].get())){
+				if(curX!=-1 && curY!=-1 && autoAccept && curWand[fr-1].probable && buttonpress[2].get()){
 						acceptedROI.set(true);
 				}
 				//if((auto||!firsthit) && x!=-1 && y!=-1 && !firsttime)acceptedROI=true; else IJ.wait(200);
@@ -961,7 +962,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				gocellcomplete=false;
 				ignoreCellComplete=false;
 				boolean oktogo=true;
-				if( (!editing || !(reconfirming && skipconfirmation)) && (frms>1)){
+				if( ((!editing && frms>1) || !(reconfirming && skipconfirmation)) && (frms>1)){
 					GenericDialog gd = new GenericDialog("Cell Complete");
 					String message="All done with cell #"+celln+"?";
 					if(!cellcomplete)message=message+"\nWarning: Some frames have no data!!";
@@ -1584,31 +1585,31 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 
 		
 
-	private void appendLineFromRoi(Roi roi, int frame, boolean draw, boolean checkZ){
-		int fr=frame-1;
-		if(roi!=null) {
-			int z=roi.getZPosition();
-			roi.setPosition(0, 0, 0);
-			if(z==0){
-				z=getDuraCellZ(simp, roi);
-				if(z==simp.getNSlices())z=simp.getZ();
+		private void appendLineFromRoi(Roi roi, int frame, boolean draw, boolean checkZ){
+			int fr=frame-1;
+			if(roi!=null) {
+				int z=roi.getZPosition();
+				roi.setPosition(0, 0, 0);
+				if(z==0){
+					z=getDuraCellZ(simp, roi);
+					if(z==simp.getNSlices())z=simp.getZ();
+				}
+				if(z>simp.getNSlices() || z<1)z=simp.getZ();
+				curWand[fr]=new AutoWandRoi(roi, 0.0, simp.getC(), z, fr+1);
+				curWand[fr].accept(draw, roin++);
+				results.appendLine(curWand[fr].output);
+				curWand[fr].draw();
+			}else {
+				HashMap<HEADINGS, Object> emptyvals=new HashMap<HEADINGS, Object>();
+				emptyvals.put(HEADINGS.LABEL, cellLabel);
+				emptyvals.put(HEADINGS.ROI, 0);
+				emptyvals.put(HEADINGS.CELL, celln);
+				emptyvals.put(HEADINGS.FRAME, (fr+1));
+				emptyvals.put(HEADINGS.THRESH, -1);
+				emptyvals.put(HEADINGS.TIME, times[fr]);
+				results.appendLine(emptyvals);
 			}
-			if(z>simp.getNSlices() || z<1)z=simp.getZ();
-			curWand[fr]=new AutoWandRoi(roi, 0.0, simp.getC(), z, fr+1);
-			curWand[fr].accept(draw, roin++);
-			results.appendLine(curWand[fr].output);
-			curWand[fr].draw();
-		}else {
-			HashMap<HEADINGS, Object> emptyvals=new HashMap<HEADINGS, Object>();
-			emptyvals.put(HEADINGS.LABEL, cellLabel);
-			emptyvals.put(HEADINGS.ROI, 0);
-			emptyvals.put(HEADINGS.CELL, celln);
-			emptyvals.put(HEADINGS.FRAME, (fr+1));
-			emptyvals.put(HEADINGS.THRESH, -1);
-			emptyvals.put(HEADINGS.TIME, times[fr]);
-			results.appendLine(emptyvals);
 		}
-	}
 
 		public void addPostData(int postDataType) {
 			addPostData(postDataType, false);
@@ -3464,10 +3465,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		if(addDirectRoi)return;
 		int rotation = e.getWheelRotation();
 		//int amount = e.getScrollAmount();
-		boolean ctrl = (e.getModifiersEx() & MouseEvent.CTRL_DOWN_MASK)!=0;
+		boolean ctrl = (e.getModifiersEx() & (InputEvent.CTRL_DOWN_MASK | InputEvent.META_DOWN_MASK))!=0;
 
 		// horizontal scroll wheel on mice will deliver a scrollwheel event with the shift mask
-		boolean isHorizontalScroll=((e.getModifiersEx() & InputEvent.SHIFT_DOWN_MASK)!=0);
+		boolean isHorizontalScroll=((e.getModifiersEx() & InputEvent.SHIFT_DOWN_MASK)!=0) && !IJ.isMacOSX();
 		if(isHorizontalScroll) {
 			if(simp.getNFrames()>1) IJ.setKeyDown(KeyEvent.VK_CONTROL);
 			if (rotation>0)
@@ -3482,6 +3483,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			changeThresh(rotation);
 		} else{
 			simp.getWindow().mouseWheelMoved(e);
+			if(DEBUG)IJ.log("Mouse wheel moved with ctrl, passing to ImagePlus");
 		}
 	}
 	
@@ -3514,9 +3516,21 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 
 	final Point xyPress=new Point(-1,-1);
 	final AtomicBoolean wasDragged=new AtomicBoolean(false);
+	final AtomicBoolean spaceDrag=new AtomicBoolean(false);
 
 	public void mousePressed(MouseEvent e) { 
-		if(IJ.spaceBarDown() || addDirectRoi) return;
+		simp.getCanvas().requestFocusInWindow();
+		if(addDirectRoi) return;
+		if(spacepress.get()) {
+			IJ.setKeyDown(KeyEvent.VK_SPACE);
+			MouseEvent newe=new MouseEvent(simp.getCanvas(), e.getID(), e.getWhen(), 
+				e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), 
+				e.getX(), e.getY(), e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
+			simp.getCanvas().mousePressed(newe);
+			spaceDrag.set(true);
+			e.consume();
+			return;
+		}
 		// || e.getButton()==MouseEvent.BUTTON2
 		int flags = e.getModifiersEx();
 		Point xy = simp.getCanvas().getCursorLoc();
@@ -3543,6 +3557,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	
 	public void mouseDragged(MouseEvent e) {
 		int flags = e.getModifiersEx();
+		if(spacepress.get() || spaceDrag.get()) return;
 		if(DEBUG) IJ.log("\\Update:buttonDragged: "+(((flags&InputEvent.BUTTON1_DOWN_MASK)!=0)?"1":"")+(((flags&InputEvent.BUTTON2_DOWN_MASK)!=0)?"2":"")+(((flags&InputEvent.BUTTON3_DOWN_MASK)!=0)?"3":"")+" "+e.getID());
 		if((flags&InputEvent.BUTTON1_DOWN_MASK) !=0) {
 			if(xyPress.x>=0 && xyPress.y>=0) {
@@ -3579,6 +3594,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	
 	public void mouseReleased(MouseEvent e) {
 		if(addDirectRoi) return;
+		if(spacepress.get() || spaceDrag.get()) {
+			IJ.setKeyUp(KeyEvent.VK_SPACE);
+			return;
+		}
 		if(DEBUG) IJ.log("buttonReleased: "+e.getModifiersEx()+" button: "+e.getButton());
 		Point xy=simp.getCanvas().getCursorLoc();
 		if(e.getButton()==MouseEvent.BUTTON1) {
@@ -3646,7 +3665,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		int keyCode = e.getKeyCode();
 		//char keyChar = e.getKeyChar();
 		if(keyCode==KeyEvent.VK_SPACE) { //space key
-			if(!buttonpress[0].get()){ //mouse button while spacebar pressed
+			if(!spaceDrag.getAndSet(false)){ //mouse button while spacebar pressed
 				acceptedROI.set(true);
 			}
 			spacepress.set(false);
@@ -3682,12 +3701,16 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	public void keyTyped(KeyEvent e) {}
 
 	private void changeLutType() {
+		if(simp==null)return;
+		if(simp.isComposite()) return;
 		MYLUT++;
 		if(MYLUT>3)MYLUT=0;
 		if(MYLUT==2) {
 			ImageProcessor sip=simp.getProcessor();
 			sip.setMinAndMax(sip.getMin(),sip.getMax());
 		}
+		// RED_LUT=0, BLACK_AND_WHITE_LUT=1, NO_LUT_UPDATE=2, OVER_UNDER_LUT=3;
+		tctpanel.setTextLine(TctLines.EXTRA, "LUT: "+(MYLUT==0?"Red":(MYLUT==1?"Black & White":(MYLUT==2?"No LUT Update":"Over/Under"))));
 	}
 
 	/**
