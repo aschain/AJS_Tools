@@ -171,4 +171,26 @@ public class ThinPlateSpline3D {
         }
         return maxDz;
     }
+
+    /** Max absolute X or Y displacement induced by the transform, sampled on a coarse grid. */
+    public static double computeMaxXYDisplacement(ThinPlateSpline3D tps, int w, int h, int sls, int xystep) {
+        double maxD = 0.0;
+        double[] pt = new double[3];
+        int zstep = Math.max(1, sls / 4);
+
+        for (int z = 0; z < sls; z += zstep) {
+            pt[2] = z;
+            for (int y = 0; y < h; y += Math.max(1, xystep)) {
+                pt[1] = y;
+                for (int x = 0; x < w; x += Math.max(1, xystep)) {
+                    pt[0] = x;
+                    double[] mapped = tps.transform(pt);
+                    double dx = Math.abs(mapped[0] - pt[0]);
+                    double dy = Math.abs(mapped[1] - pt[1]);
+                    maxD = Math.max(maxD, Math.max(dx, dy));
+                }
+            }
+        }
+        return maxD;
+    }
 }

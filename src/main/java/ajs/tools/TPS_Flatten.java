@@ -7,9 +7,13 @@ import ij.ImageStack;
 import ij.WindowManager;
 import ij.gui.GenericDialog;
 import ij.plugin.PlugIn;
+import ij.process.ByteProcessor;
+import ij.process.ColorProcessor;
 import ij.process.FloatProcessor;
 import ij.process.ImageProcessor;
+import ij.process.ShortProcessor;
 
+import java.awt.Rectangle;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
@@ -31,6 +35,10 @@ import net.haesleinhuepf.clij2.CLIJ2;
  * Landmarks are projected to z = average_z of all landmarks (flat XY plane).
  */
 public class TPS_Flatten implements PlugIn {
+
+    // Caps voxels per single GPU kernel dispatch to keep it short enough to avoid
+    // Windows GPU driver TDR watchdog resets (which invalidate the OpenCL command queue).
+    private static final int MAX_VOXELS_PER_LAUNCH = 16_000_000;
 
     @Override
     public void run(String arg) {
@@ -200,7 +208,38 @@ public class TPS_Flatten implements PlugIn {
 
             // Prepare output hyperstack
             int newsls=sls+(int)ThinPlateSpline3D.computeMaxZDisplacement(tps, w, h, sls, w/6,1);
-            ImageStack finalstack=new ImageStack(w,h,chs*newsls*frms);
+
+            // Determine whether the volume needs to be split into XY tiles to fit on the GPU.
+            // CLIJ's ClearCL API (this version) has no "free memory" query, only total device
+            // memory and the max single-allocation size, so budget conservatively against those.
+            int bytesPerPixel = getBytesPerPixel(oimp.getBitDepth());
+            net.haesleinhuepf.clij.clearcl.ClearCLDevice device = context.getDevice();
+            long totalMem = device.getGlobalMemorySizeInBytes();
+            long maxAlloc = device.getMaxMemoryAllocationSizeInBytes();
+            long memBudget = (long) (totalMem * 0.5); // leave headroom for driver/OS/other buffers
+            long allocBudget = (long) (maxAlloc * 0.9);
+
+            long pixelsLimitFromTotal = Math.max(1, memBudget / (((long) sls + newsls) * bytesPerPixel));
+            long pixelsLimitFromAlloc = Math.max(1, allocBudget / ((long) Math.max(sls, newsls) * bytesPerPixel));
+            long maxPixelsPerTile = Math.min(pixelsLimitFromTotal, pixelsLimitFromAlloc);
+
+            int tilesX = 1, tilesY = 1;
+            if (maxPixelsPerTile < (long) w * h) {
+                int tileSide = Math.max(1, (int) Math.sqrt((double) maxPixelsPerTile));
+                tilesX = Math.max(1, (int) Math.ceil((double) w / tileSide));
+                tilesY = Math.max(1, (int) Math.ceil((double) h / tileSide));
+                IJ.log(String.format("GPU memory: %.2f GB total (max alloc %.2f GB); volume needs splitting -> %d x %d XY tiles",
+                    totalMem / 1e9, maxAlloc / 1e9, tilesX, tilesY));
+            }
+            int tileW = (int) Math.ceil((double) w / tilesX);
+            int tileH = (int) Math.ceil((double) h / tilesY);
+
+            // Overlap margin so TPS-displaced samples near tile edges still fall inside the cropped input
+            int margin = 0;
+            if (tilesX * tilesY > 1) {
+                margin = (int) Math.ceil(ThinPlateSpline3D.computeMaxXYDisplacement(tps, w, h, sls, Math.max(1, w / 12))) + 2;
+                IJ.log("XY tile overlap margin: " + margin + " px");
+            }
 
             // Load kernel once
             String kernelCode = loadKernelSource();
@@ -210,57 +249,91 @@ public class TPS_Flatten implements PlugIn {
             }
             net.haesleinhuepf.clij.clearcl.ClearCLProgram program = context.createProgram(kernelCode);
             program.build();
-            
-            // Check for build errors
-            //String buildLog = program.getBuildLog();
-            //if (buildLog != null && !buildLog.trim().isEmpty()) {
-            //    IJ.log("OpenCL Build Log: " + buildLog);
-            //}
-            
             net.haesleinhuepf.clij.clearcl.ClearCLKernel kernel = program.createKernel("tpsResample");
-            long[] globalSize = {w, h, newsls};
 
-            for (int fr = 1; fr <= frms; fr++) {
-                for (int ch = 1; ch <= chs; ch++) {
-                    IJ.showProgress((double)((fr-1)*chs + (ch-1)) / (frms*chs));
+            ImageStack finalstack = new ImageStack(w, h, chs * newsls * frms);
+            for (int idx = 1; idx <= chs * newsls * frms; idx++) {
+                finalstack.setProcessor(createBlankProcessor(oimp.getBitDepth(), w, h), idx);
+            }
 
-                    // Build single-channel ImagePlus for this channel/frame
-                    ImagePlus imp = IJ.createImage("gpushifter", w, h, sls, oimp.getBitDepth());
-                    for (int z = 1; z <= sls; z++) {
-                        //if(z<=sls)
-                        imp.getStack().setProcessor(oimp.getStack().getProcessor(oimp.getStackIndex(ch, z, fr)), z);
-                        //else imp.getStack().setProcessor(oimp.getStack().getProcessor(1).createProcessor(w, h), z);
+            int totalUnits = tilesX * tilesY * frms * chs;
+            int unitsDone = 0;
+
+            for (int ty = 0; ty < tilesY; ty++) {
+                int outY0 = ty * tileH;
+                int outTileH = Math.min(tileH, h - outY0);
+                for (int tx = 0; tx < tilesX; tx++) {
+                    int outX0 = tx * tileW;
+                    int outTileW = Math.min(tileW, w - outX0);
+
+                    int inX0 = Math.max(0, outX0 - margin);
+                    int inY0 = Math.max(0, outY0 - margin);
+                    int inTileW = Math.min(w, outX0 + outTileW + margin) - inX0;
+                    int inTileH = Math.min(h, outY0 + outTileH + margin) - inY0;
+                    Rectangle cropRect = new Rectangle(inX0, inY0, inTileW, inTileH);
+
+                    for (int fr = 1; fr <= frms; fr++) {
+                        for (int ch = 1; ch <= chs; ch++) {
+                            IJ.showProgress((double) unitsDone / totalUnits);
+                            unitsDone++;
+
+                            // Build single-channel, tile-cropped ImagePlus for this channel/frame
+                            ImagePlus imp = IJ.createImage("gpushifter", inTileW, inTileH, sls, oimp.getBitDepth());
+                            for (int z = 1; z <= sls; z++) {
+                                ImageProcessor srcIp = oimp.getStack().getProcessor(oimp.getStackIndex(ch, z, fr));
+                                srcIp.setRoi(cropRect);
+                                imp.getStack().setProcessor(srcIp.crop(), z);
+                            }
+
+                            // Push input and create output sized to this tile
+                            net.haesleinhuepf.clij.clearcl.ClearCLImage inputGPU = clij2.convert(imp, net.haesleinhuepf.clij.clearcl.ClearCLImage.class);
+                            net.haesleinhuepf.clij.clearcl.ClearCLImage outputGPU = clij2.create(new long[]{outTileW, outTileH, newsls}, inputGPU.getChannelDataType());
+
+                            // Set kernel args that don't change across Z-chunks
+                            kernel.setArgument("inputImage", inputGPU);
+                            kernel.setArgument("outputImage", outputGPU);
+                            kernel.setArgument("tpsWeights", weightsGPU);
+                            kernel.setArgument("affineCoeff", affineGPU);
+                            kernel.setArgument("landmarkSrc", landmarkGPU);
+                            kernel.setArgument("N", N);
+                            kernel.setArgument("outTileWidth", outTileW);
+                            kernel.setArgument("outTileHeight", outTileH);
+                            kernel.setArgument("outOffsetX", outX0);
+                            kernel.setArgument("outOffsetY", outY0);
+                            kernel.setArgument("outDepth", newsls);
+                            kernel.setArgument("fullWidth", w);
+                            kernel.setArgument("fullHeight", h);
+                            kernel.setArgument("inTileWidth", inTileW);
+                            kernel.setArgument("inTileHeight", inTileH);
+                            kernel.setArgument("inOffsetX", inX0);
+                            kernel.setArgument("inOffsetY", inY0);
+                            kernel.setArgument("imgDepth", sls);
+
+                            // Chunk the Z range across multiple kernel launches so a single dispatch
+                            // stays short enough to avoid GPU driver watchdog (TDR) timeouts/resets
+                            // on large volumes, which would otherwise leave the command queue invalid.
+                            int zChunk = Math.max(1, MAX_VOXELS_PER_LAUNCH / Math.max(1, outTileW * outTileH));
+                            for (int z0 = 0; z0 < newsls; z0 += zChunk) {
+                                int chunkLen = Math.min(zChunk, newsls - z0);
+                                kernel.setArgument("outOffsetZ", z0);
+                                kernel.setGlobalSizes(new long[]{outTileW, outTileH, chunkLen});
+                                kernel.run(true);
+                            }
+
+                            // Pull result back and paste into the full-size output stack
+                            ImagePlus result = clij2.convert(outputGPU, ImagePlus.class);
+                            for (int z = 1; z <= newsls; z++) {
+                                int idx = ch + (z - 1) * chs + (fr - 1) * chs * newsls;
+                                finalstack.getProcessor(idx).insert(result.getStack().getProcessor(z), outX0, outY0);
+                            }
+
+                            // Cleanup per-tile/channel
+                            inputGPU.close();
+                            outputGPU.close();
+                            imp.close();
+                            result.close();
+                        }
                     }
-
-                    // Push input and create output matching input
-                    net.haesleinhuepf.clij.clearcl.ClearCLImage inputGPU = clij2.convert(imp, net.haesleinhuepf.clij.clearcl.ClearCLImage.class);
-                    net.haesleinhuepf.clij.clearcl.ClearCLImage outputGPU = clij2.create(new long[]{w, h, newsls}, inputGPU.getChannelDataType());
-
-                    // Set kernel args and run
-                    kernel.setArgument("inputImage", inputGPU);
-                    kernel.setArgument("outputImage", outputGPU);
-                    kernel.setArgument("tpsWeights", weightsGPU);
-                    kernel.setArgument("affineCoeff", affineGPU);
-                    kernel.setArgument("landmarkSrc", landmarkGPU);
-                    kernel.setArgument("N", N);
-                    kernel.setArgument("imgWidth", w);
-                    kernel.setArgument("imgHeight", h);
-                    kernel.setArgument("imgDepth", sls);
-
-                    kernel.setGlobalSizes(globalSize);
-                    kernel.run(true);
-
-                    // Pull result back and store
-                    ImagePlus result = clij2.convert(outputGPU, ImagePlus.class);
-                    for (int z = 1; z <= newsls; z++) {
-                        finalstack.setProcessor(result.getStack().getProcessor(z), ch + (z-1)*chs + (fr-1)*chs*newsls);
-                    }
-
-                    // Cleanup per-channel
-                    inputGPU.close();
-                    outputGPU.close();
-                    imp.close();
-                    result.close();
                 }
             }
 
@@ -296,6 +369,24 @@ public class TPS_Flatten implements PlugIn {
         } catch (Exception e) {
             IJ.error("GPU Error: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+
+    private int getBytesPerPixel(int bitDepth) {
+        switch (bitDepth) {
+            case 8: return 1;
+            case 16: return 2;
+            case 24: return 4; // RGB color
+            default: return 4; // 32-bit float
+        }
+    }
+
+    private ImageProcessor createBlankProcessor(int bitDepth, int w, int h) {
+        switch (bitDepth) {
+            case 8: return new ByteProcessor(w, h);
+            case 16: return new ShortProcessor(w, h);
+            case 24: return new ColorProcessor(w, h);
+            default: return new FloatProcessor(w, h);
         }
     }
 

@@ -113,7 +113,13 @@ __kernel void identitySample(
 }
 
 /**
- * Full TPS kernel: evaluate TPS transform and trilinearly resample input
+ * Full TPS kernel: evaluate TPS transform and trilinearly resample input.
+ * Supports XY tiling: the output buffer may be a sub-region (tile) of the full image,
+ * and the input buffer may be a correspondingly cropped (with margin) region of the source image.
+ * outOffsetX/Y locate the tile within the full-image coordinate space used by the TPS/landmarks.
+ * inOffsetX/Y locate the (possibly cropped) input buffer within that same full-image coordinate space.
+ * outOffsetZ/outDepth allow a single kernel launch to cover only a Z sub-range of the output buffer,
+ * so long-running dispatches can be chunked to avoid GPU driver watchdog (TDR) resets.
  */
 __kernel void tpsResample(
     read_only image3d_t inputImage,
@@ -122,30 +128,50 @@ __kernel void tpsResample(
     global float *affineCoeff,
     global float *landmarkSrc,
     int N,
-    int imgWidth,
-    int imgHeight,
+    int outTileWidth,
+    int outTileHeight,
+    int outOffsetX,
+    int outOffsetY,
+    int outOffsetZ,
+    int outDepth,
+    int fullWidth,
+    int fullHeight,
+    int inTileWidth,
+    int inTileHeight,
+    int inOffsetX,
+    int inOffsetY,
     int imgDepth) {
     
-    int x = get_global_id(0);
-    int y = get_global_id(1);
-    int z = get_global_id(2);
+    int lx = get_global_id(0);
+    int ly = get_global_id(1);
+    int lz = get_global_id(2);
     
-    // if (x >= imgWidth || y >= imgHeight || z >= imgDepth) return;
-    if (x >= imgWidth || y >= imgHeight) return;
+    if (lx >= outTileWidth || ly >= outTileHeight) return;
+    
+    int z = lz + outOffsetZ;
+    if (z >= outDepth) return;
+    
+    // Coordinates in the full-image space (must match the space the landmarks were fit in)
+    int gx = lx + outOffsetX;
+    int gy = ly + outOffsetY;
     
     // Evaluate TPS at output voxel
-    float3 srcPt = tpsEval((float)x, (float)y, (float)z, tpsWeights, affineCoeff, landmarkSrc, N);
+    float3 srcPt = tpsEval((float)gx, (float)gy, (float)z, tpsWeights, affineCoeff, landmarkSrc, N);
     
-    // Clamp to bounds
-    srcPt.x = max(0.0f, min((float)(imgWidth - 1), srcPt.x));
-    srcPt.y = max(0.0f, min((float)(imgHeight - 1), srcPt.y));
-    //srcPt.z = max(0.0f, min((float)(imgDepth - 1), srcPt.z));
-    if(srcPt.z < 0.0f || srcPt.z > (float)(imgDepth-1)) return;
+    // Clamp to full-image bounds
+    srcPt.x = max(0.0f, min((float)(fullWidth - 1), srcPt.x));
+    srcPt.y = max(0.0f, min((float)(fullHeight - 1), srcPt.y));
+    if (srcPt.z < 0.0f || srcPt.z > (float)(imgDepth - 1)) return;
+    
+    // Convert to local coordinates within the (possibly cropped) input buffer
+    float lsx = max(0.0f, min((float)(inTileWidth - 1), srcPt.x - (float)inOffsetX));
+    float lsy = max(0.0f, min((float)(inTileHeight - 1), srcPt.y - (float)inOffsetY));
     
     // Trilinear sample
-    float val = trilinearSample(inputImage, srcPt.x, srcPt.y, srcPt.z);
+    float val = trilinearSample(inputImage, lsx, lsy, srcPt.z);
     
     // Write output
-    write_imagef(outputImage, (int4)(x, y, z, 0), (float4)(val, 0, 0, 0));
+    write_imagef(outputImage, (int4)(lx, ly, z, 0), (float4)(val, 0, 0, 0));
 }
+
 
