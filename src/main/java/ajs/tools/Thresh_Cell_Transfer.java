@@ -143,6 +143,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	private int[] ccr2frames=null;
 	private AtomicInteger recalcABV=new AtomicInteger(0);
 	private boolean setLocations=ij.Prefs.get("AJTCT.setLocations", true);
+	private ImagePlus wandImage=null;
 
 	public void run(String arg) {
 		if(arg.contentEquals("getClosestMaxZ")){
@@ -297,6 +298,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		preStripListeners();
 		ImageCanvas ic = simp.getCanvas();
 		ic.disablePopupMenu(true);
+		ic.removeMouseListener(ic);
+		ic.removeMouseMotionListener(ic);
 		ic.addMouseListener(this);
 		ic.addMouseMotionListener(this);
 		ic.removeKeyListener(IJ.getInstance());
@@ -502,6 +505,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		if(!("Unlabeled".equals(cellLabel))) timp.setProperty("Info", results.getText(true));
 
 		int chs=simp.getNChannels();
+		if(greench>=chs)greench=1;
+		if(redch>=chs)redch=chs>=2?2:1;
 		int[] grrchs=AJ_Utils.getInfoLineInts(simp.getInfoProperty(), new String[]{"TCT Chs"});
 		if(grrchs!=null && (grrchs.length!=2 || grrchs[0]<1 || grrchs[1]<1)){
 			grrchs=null;
@@ -519,8 +524,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			if(grrchs!=null) {
 				tctgd.addMessage("Using saved TCT Chs: "+grrchs[0]+" (Green), "+grrchs[1]+" (Red)");
 			}
-			tctgd.addNumericField("Green (Primary) Ch:", greench<=chs?greench:1);
-			tctgd.addNumericField("Red (Secondary) Ch:", redch<=chs?redch:(chs>=2?2:1));
+			tctgd.addNumericField("Green (Primary) Ch:", greench);
+			tctgd.addNumericField("Red (Secondary) Ch:", redch);
 			tctgd.addCheckbox("Adjust LUTs?", false);
 			if("Unlabeled".equals(cellLabel)){
 				ArrayList<String> askLabels=new ArrayList<String>(cellLabels);
@@ -530,6 +535,16 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				tctgd.addStringField("Or new label: ", "");
 				tctgd.addCheckbox("Draw Label on AJTCT stack?", drawCellLabel);
 			}
+			tctgd.addDialogListener(new DialogListener() {
+				public boolean dialogItemChanged(GenericDialog gd, AWTEvent e) {
+					int greencht=(int)gd.getNextNumber();
+					int redcht=(int)gd.getNextNumber();
+					if(greencht!=greench && redcht==redch && greencht==redch){
+						((TextField)gd.getNumericFields().get(1)).setText(""+greench);
+					}
+					return true;
+				}
+			});
 			tctgd.showDialog();
 			if(tctgd.wasCanceled())return;
 			greench=(int)tctgd.getNextNumber();
@@ -567,29 +582,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		});  
 		tctpanel.setVisible(true);
 
-		if(setLocations){
-			java.awt.GraphicsDevice screen1 = simp.getWindow().getGraphicsConfiguration().getDevice();
-			java.awt.GraphicsDevice screen2 = screen1;
-			java.awt.GraphicsDevice[] screens = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices();
-			if(screens.length>1) {
-				if(screens[0]==screen1)screen2=screens[1];
-				else screen2=screens[0];
-			}
-			Rectangle s1b=screen1.getDefaultConfiguration().getBounds();
-			Rectangle s2b=screen2.getDefaultConfiguration().getBounds();
-			if(simp.getWindow().getWidth()<s1b.width/2){
-				simp.getWindow().setLocation(s1b.x+s1b.width/2-simp.getWindow().getWidth()-5, s1b.y+s1b.height/2-simp.getWindow().getHeight()/2);
-				timp.getWindow().setLocation(s1b.x+s1b.width/2+5, s1b.y+s1b.height/2-timp.getWindow().getHeight()/2);
-			}
-			results.rtw.setLocation(s2b.x+5, s2b.y+5);
-			results.rtw.setSize(s2b.width-30, s2b.y+s2b.height/2-5);
-			java.awt.Window logw=WindowManager.getWindow("Log");
-			if(logw!=null) {
-				logw.setLocation(s2b.x+5, s2b.y+s2b.height/2);
-				logw.setSize(s2b.width/2-10, (s2b.height/2)-5);
-			}
-			timp.getWindow().toFront();
-			simp.getWindow().toFront();
+		if(ij.Prefs.get("AJTCT.wandImage", false)){
+			showHideWandImage();
+		}else if(setLocations){
+			setWindowLocations(LocChoice.MIDDLE);
 		}
 
 		//Initialize loop variables
@@ -854,7 +850,14 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					xprev=curX;yprev=curY;
 					Point c=new Point(curX,curY);
 					if(pointIndex>=xys.size()) {
-						xys.add(new WandPoint(c, defaultThresh==0?simp.getProcessor().get(curX, curY)/2.0:defaultThresh, false));
+						double thresh=defaultThresh;
+						if(thresh==0){
+							if(curWand[fr-1]!=null && curWand[fr-1].mask!=null && curWand[fr-1].mask.length>pointIndex && 
+								curWand[fr-1].mask[pointIndex]!=null && curWand[fr-1].mask[pointIndex]!=curWand[fr-1].getFullIp())
+								thresh=curWand[fr-1].mask[pointIndex].get(curX, curY)/1.2;
+							else thresh=simp.getProcessor().get(curX, curY)/1.2;
+						}
+						xys.add(new WandPoint(c, thresh, false));
 					}else {
 						xys.get(pointIndex).setPoint(c);
 						if(xys.get(pointIndex).thresh==0)xys.get(pointIndex).setThresh(simp.getProcessor().get(curX, curY)/2.0);
@@ -1228,6 +1231,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				ic.removeKeyListener(this);
 				ic.removeMouseListener(this);
 				ic.removeMouseMotionListener(this);
+				ic.addMouseListener(ic);
+				ic.addMouseMotionListener(ic);
 				siw.removeMouseWheelListener(this);
 				siw.addMouseWheelListener(siw);
 				ic.disablePopupMenu(false);
@@ -1241,6 +1246,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			ajc.removeMouseListener(mouseListeners[mouseListeners.length-1]);
 			ajc.removeMouseMotionListener(mouseMotionListeners[mouseMotionListeners.length-1]);
 		}
+		if(wandImage!=null)wandImage.close();
 		IJ.log("Thresh Cell Tranfer complete");
 	}
 	
@@ -1348,6 +1354,97 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		}else {
 			plotWindow=plot.show();
 		}
+	}
+
+	enum LocChoice {MIDDLE, LEFT};
+
+	private void setWindowLocations(LocChoice choice){
+		java.awt.GraphicsDevice screen1 = simp.getWindow().getGraphicsConfiguration().getDevice();
+		java.awt.GraphicsDevice screen2 = screen1;
+		java.awt.GraphicsDevice[] screens = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices();
+		if(screens.length>1) {
+			if(screens[0]==screen1)screen2=screens[1];
+			else screen2=screens[0];
+		}
+		Rectangle s1b=screen1.getDefaultConfiguration().getBounds();
+		Rectangle s2b=screen2.getDefaultConfiguration().getBounds();
+
+		if(choice==LocChoice.MIDDLE){
+			if(simp.getWindow().getWidth()<s1b.width/2){
+				simp.getWindow().setLocation(s1b.x+s1b.width/2-simp.getWindow().getWidth()-5, s1b.y+s1b.height/2-simp.getWindow().getHeight()/2);
+				timp.getWindow().setLocation(s1b.x+s1b.width/2+5, s1b.y+s1b.height/2-timp.getWindow().getHeight()/2);
+			}
+			results.rtw.setLocation(s2b.x+5, s2b.y+5);
+			results.rtw.setSize(s2b.width-30, s2b.y+s2b.height/2-5);
+			java.awt.Window logw=WindowManager.getWindow("Log");
+			if(logw!=null) {
+				logw.setLocation(s2b.x+5, s2b.y+s2b.height/2);
+				logw.setSize(s2b.width/2-10, (s2b.height/2)-5);
+			}
+			timp.getWindow().toFront();
+			simp.getWindow().toFront();
+		}else if(choice==LocChoice.LEFT){
+			if(simp.getWindow().getWidth()<s1b.width/2){
+				simp.getWindow().setLocation(s1b.x+5, s1b.y+s1b.height/2-simp.getWindow().getHeight()/2);
+				Rectangle sbs=simp.getWindow().getBounds();
+				timp.getWindow().setLocation(sbs.x+sbs.width+5, s1b.y+s1b.height/2-timp.getWindow().getHeight()/2);
+			}
+			results.rtw.setLocation(s2b.x+5, s2b.y+5);
+			results.rtw.setSize(s2b.width-30, s2b.y+s2b.height/2-5);
+			java.awt.Window logw=WindowManager.getWindow("Log");
+			if(logw!=null) {
+				logw.setLocation(s2b.x+5, s2b.y+s2b.height/2);
+				logw.setSize(s2b.width/2-10, (s2b.height/2)-5);
+			}
+			timp.getWindow().toFront();
+			simp.getWindow().toFront();
+		}
+	}
+
+	private float[] subtractOtherChannels=null;
+
+	private void showHideWandImage(){
+		if(simp==null) return;
+		if(wandImage!=null) {
+			wandImage.close();
+			wandImage=null;
+			if(setLocations) setWindowLocations(LocChoice.MIDDLE);
+			ij.Prefs.set("AJTCT.wandImage", false);
+		}else {
+			int w=xymaskmax, h=xymaskmax;
+			if(w==0) {
+				w=h=200;
+			}
+			if(setLocations) setWindowLocations(LocChoice.LEFT);
+			wandImage=new ImagePlus("Wand Image", simp.getProcessor().createProcessor(xymaskmax, xymaskmax));
+			wandImage.show();
+			int nch=simp.getNChannels();
+			if(subtractOtherChannels==null || subtractOtherChannels.length!=nch) subtractOtherChannels=new float[nch];
+			ImageWindow wiw=wandImage.getWindow();
+			for(int c=0;c<nch;c++) {
+				if(c==greench-1) continue;
+				final int ch=c;
+				ScrollbarWithLabel sb=new ScrollbarWithLabel((StackWindow)null, Math.round(subtractOtherChannels[ch]*100), 1, 0, 200+1, (""+(c+1)).toCharArray()[0]);
+				sb.addAdjustmentListener(new AdjustmentListener() {
+					public void adjustmentValueChanged(AdjustmentEvent e) {
+						subtractOtherChannels[ch]=e.getValue()/100f;
+						if(curWand[simp.getFrame()-1]!=null) {
+							curWand[simp.getFrame()-1].updateMasks();
+						}
+					}
+				});
+				wiw.add(sb);
+			}
+			wiw.pack();
+			Rectangle s1b=simp.getWindow().getGraphicsConfiguration().getDevice().getDefaultConfiguration().getBounds();
+			Rectangle tbs=timp.getWindow().getBounds();
+			int remW=s1b.width-(tbs.x+tbs.width);
+			wandImage.getWindow().setLocation(tbs.x+tbs.width+5, s1b.y+s1b.height/2-wandImage.getWindow().getHeight()/2);
+			Rectangle wbs=wandImage.getWindow().getBounds();
+			wandImage.getWindow().setSize(remW-10, wbs.height/wbs.width*(remW-10));
+			ij.Prefs.set("AJTCT.wandImage", true);
+		}
+		ij.Prefs.savePreferences();
 	}
 	
 	public static void convertTCTtoGlasbey(ImagePlus imp, double xycal) {
@@ -2386,6 +2483,14 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				@Override
 				public void actionPerformed(ActionEvent e) {
 					saveMDInfo();
+				}
+			});
+			options.add(mi);
+			mi=new MenuItem("Show/Hide Wand Image");
+			mi.addActionListener(new ActionListener() {
+				@Override
+				public void actionPerformed(ActionEvent e) {
+					showHideWandImage();
 				}
 			});
 			options.add(mi);
@@ -3508,6 +3613,11 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		//sip.setThreshold(cthresh, (double) 65535, MYLUT);
 		//if(!simp.isHyperStack())simp.updateAndDraw();
 		threshChanged.set(true);
+		if(wandImage!=null) {
+			ImageProcessor ip=wandImage.getProcessor();
+			ip.setMinAndMax(ip.getMin(), cthresh);
+			wandImage.updateAndDraw();
+		}
 	}
 
 	public void actionPerformed(ActionEvent event){ 
@@ -3520,7 +3630,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 
 	public void mousePressed(MouseEvent e) { 
 		simp.getCanvas().requestFocusInWindow();
-		if(addDirectRoi) return;
+		if(addDirectRoi) {
+			simp.getCanvas().mousePressed(e);
+			return;
+		}
 		if(spacepress.get()) {
 			IJ.setKeyDown(KeyEvent.VK_SPACE);
 			MouseEvent newe=new MouseEvent(simp.getCanvas(), e.getID(), e.getWhen(), 
@@ -3528,7 +3641,6 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				e.getX(), e.getY(), e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
 			simp.getCanvas().mousePressed(newe);
 			spaceDrag.set(true);
-			e.consume();
 			return;
 		}
 		// || e.getButton()==MouseEvent.BUTTON2
@@ -3549,15 +3661,22 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			xyPress.setLocation(xy);
 		}
 		if((flags & InputEvent.BUTTON3_DOWN_MASK) !=0) {buttonpress[2].set(true); acceptedROI.set(true);}
-		e.consume();
 	}
 
 	public void mouseMoved(MouseEvent e) {
+		simp.getCanvas().mouseMoved(e);
 	}
 	
 	public void mouseDragged(MouseEvent e) {
 		int flags = e.getModifiersEx();
-		if(spacepress.get() || spaceDrag.get()) return;
+		if(spacepress.get() || spaceDrag.get()) {
+			simp.getCanvas().mouseDragged(e);
+			return;
+		}
+		final MouseEvent newPressEvent=new MouseEvent(simp.getCanvas(), java.awt.event.MouseEvent.MOUSE_PRESSED, e.getWhen(), 
+			e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), 
+			simp.getCanvas().screenX(xyPress.x), simp.getCanvas().screenY(xyPress.y), 
+			e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
 		if(DEBUG) IJ.log("\\Update:buttonDragged: "+(((flags&InputEvent.BUTTON1_DOWN_MASK)!=0)?"1":"")+(((flags&InputEvent.BUTTON2_DOWN_MASK)!=0)?"2":"")+(((flags&InputEvent.BUTTON3_DOWN_MASK)!=0)?"3":"")+" "+e.getID());
 		if((flags&InputEvent.BUTTON1_DOWN_MASK) !=0) {
 			if(xyPress.x>=0 && xyPress.y>=0) {
@@ -3566,11 +3685,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				else if(altWasDown.get())rtype=DirectRoiTypes.SUBTRACTIVE;
 				if(shiftWasDown.get() && altWasDown.get())rtype=DirectRoiTypes.ONLY_WITHIN;
 				beginDirectRoi(rtype);
-				final MouseEvent newe=new MouseEvent(simp.getCanvas(), java.awt.event.MouseEvent.MOUSE_PRESSED, e.getWhen(), 
-					e.getModifiersEx() & ~(InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK), 
-					simp.getCanvas().screenX(xyPress.x), simp.getCanvas().screenY(xyPress.y), 
-					e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), false, e.getButton());
-				simp.getCanvas().mousePressed(newe);
+				simp.getCanvas().mousePressed(newPressEvent);
 				xyPress.setLocation(-1,-1);
 				if(DEBUG) IJ.log("Drag start - Direct ROI started");
 			}
@@ -3580,15 +3695,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			simp.getCanvas().mouseDragged(newe);
 		}
 		if((flags&InputEvent.BUTTON2_DOWN_MASK) !=0) {
-			Rectangle sr=simp.getCanvas().getSrcRect();
-			Point srmid=new Point(sr.x+(sr.width/2), sr.y+(sr.height/2));
-			Point xy=simp.getCanvas().getCursorLoc();
-			int dx=xyPress.x-xy.x;
-			int dy=xyPress.y-xy.y;
-			xyPress.setLocation(xy);
-			setSrcRectAtPoint(new Point(srmid.x+dx, srmid.y+dy));
+			IJ.setKeyDown(KeyEvent.VK_SPACE);
+			simp.getCanvas().mousePressed(newPressEvent);
+			simp.getCanvas().mouseDragged(e);
 		}
-		e.consume();
 		wasDragged.set(true);
 	}
 	
@@ -3596,6 +3706,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		if(addDirectRoi) return;
 		if(spacepress.get() || spaceDrag.get()) {
 			IJ.setKeyUp(KeyEvent.VK_SPACE);
+			simp.getCanvas().mouseReleased(e);
 			return;
 		}
 		if(DEBUG) IJ.log("buttonReleased: "+e.getModifiersEx()+" button: "+e.getButton());
@@ -3622,8 +3733,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				shiftWasDown.set(false);
 			}
 			buttonpress[0].set(false);
-		}
-		if(e.getButton()==MouseEvent.BUTTON2) {
+		}else if(e.getButton()==MouseEvent.BUTTON2) {
 			buttonpress[1].set(false);
 			if(!wasDragged.get()) {
 				simp.resetRoi();
@@ -3631,13 +3741,20 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				if(importingFromAllRois) {
 					acceptedROI.set(true);
 				}
+			}else{
+				IJ.setKeyUp(KeyEvent.VK_SPACE);
+				simp.getCanvas().mouseReleased(e);
 			}
-		}
-		if(e.getButton()==MouseEvent.BUTTON3) {
+		} else if(e.getButton()==MouseEvent.BUTTON3) {
 			buttonpress[2].set(false);
 			//else{acceptedROI=true;}
+		} else if(e.getButton()==4) {
+			if(simp.getNFrames()>1) IJ.run(simp, "Previous Slice [<]", "");
+			else IJ.run(simp, "Out [-]", "");
+		}else if(e.getButton()==5) {
+			if(simp.getNFrames()>1) IJ.run(simp, "Next Slice [>]", "");
+			else IJ.run(simp, "In [+]", "");
 		}
-		e.consume();
 		wasDragged.set(false);
 		xyPress.setLocation(-1,-1);
 	} 
@@ -4115,15 +4232,19 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			mask[index]=null;
 		}
 
+		public ImageProcessor getFullIp(){
+			return simp.getStack().getProcessor(simp.getStackIndex(ch, sl, fr));
+		}
+
 		public void updateMasks() {
 			
-			ImageProcessor ip=simp.getStack().getProcessor(simp.getStackIndex(ch, sl, fr));
+			ImageProcessor ip=getFullIp();
 			if(DEBUG)log("Updating masks with ip for ch "+ch+" sl "+sl+" fr "+fr);
 
 			mask=new ImageProcessor[MAX_POINTS];
 			maskRoi=new Roi[MAX_POINTS];
 			for(int i=0;i<wandPoints.size();i++) {
-				Point pw=xys.get(i).point;
+				Point pw=wandPoints.get(i).point;
 				if(pw==null)continue;
 				int x=pw.x-xymaskmax/2, y=pw.y-xymaskmax/2, xadd=0, yadd=0, w=xymaskmax, h=xymaskmax;
 				if(x<0) {xadd=-x; x=0; w+=xadd;}
@@ -4181,7 +4302,15 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 								mask[i]=null;
 								return;
 							}
-							mask[i].setf(p.x-mb.x, p.y-mb.y, ip.getf(p.x, p.y));
+							int xm=p.x-mb.x, ym=p.y-mb.y;
+							mask[i].setf(xm, ym, ip.getf(p.x, p.y));
+							if(subtractOtherChannels!=null && subtractOtherChannels.length>0) {
+								for(int c=0;c<subtractOtherChannels.length;c++) {
+									if(subtractOtherChannels[c]==0)continue;
+									ImageProcessor sip=simp.getStack().getProcessor(simp.getStackIndex(c+1, sl, fr));
+									mask[i].setf(xm, ym, Math.max(mask[i].getf(xm, ym)-(sip.getf(p.x, p.y)*subtractOtherChannels[c]),0));
+								}
+							}
 						}
 					}else{
 						for(int pi=0; pi<pts.length; pi++) {
@@ -4190,7 +4319,15 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 								mask[i]=null;
 								return;
 							}
-							mask[i].set(p.x-mb.x, p.y-mb.y, ip.get(p.x, p.y));
+							int xm=p.x-mb.x, ym=p.y-mb.y;
+							mask[i].set(xm, ym, ip.get(p.x, p.y));
+							if(subtractOtherChannels!=null && subtractOtherChannels.length>0) {
+								for(int c=0;c<subtractOtherChannels.length;c++) {
+									if(subtractOtherChannels[c]==0)continue;
+									ImageProcessor sip=simp.getStack().getProcessor(simp.getStackIndex(c+1, sl, fr));
+									mask[i].set(xm, ym, Math.max(mask[i].get(xm, ym)-(int)(sip.get(p.x, p.y)*subtractOtherChannels[c]),0));
+								}
+							}
 						}
 					}
 					if(addroi!=null){
@@ -4202,6 +4339,12 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 						}
 					}
 				}
+			}
+			if(wandImage!=null && fr==simp.getT() && mask[0]!=null && mask[0]!=ip) {
+				wandImage.setProcessor(mask[0]);
+				WandPoint wp=wandPoints.get(0);
+				if(wp!=null && wp.thresh>0)
+					wandImage.getProcessor().setMinAndMax(ip.getMin(), wp.thresh);
 			}
 		}
 
