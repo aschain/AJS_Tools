@@ -732,9 +732,11 @@ public class Mosaic_Combine_Fix implements PlugIn {
 		gd.addNumericField("Number of images in a column (y)?", yRepeatNumber, 0);
 		gd.addNumericField("Width of each image in pixels:", oImageWidth, 0);
 		gd.addNumericField("Height of each image in pixels:", oImageHeight, 0);
+		gd.addNumericField("Gaussian Blur Radius (pixels):", 20, 0);
 		if(imp.getNChannels()>1) gd.addCheckbox("Calculate from all channels?", true);
 		if(imp.getNSlices()>1) gd.addCheckbox("Calculate from all slices?", true);
 		if(imp.getNFrames()>1) gd.addCheckbox("Calculate from all frames?", true);
+		gd.addCheckbox("Apply Brightness Fix?", true);
 		if(imp.getNChannels()>1) gd.addCheckbox("Apply to all channels?", true);
 		if(imp.getNSlices()>1) gd.addCheckbox("Apply to all slices?", true);
 		if(imp.getNFrames()>1) gd.addCheckbox("Apply to all frames?", true);
@@ -788,10 +790,12 @@ public class Mosaic_Combine_Fix implements PlugIn {
 		yRepeatNumber=(int)gd.getNextNumber();
 		oImageWidth=(int)gd.getNextNumber();
 		oImageHeight=(int)gd.getNextNumber();
+		int gaussianBlurRadius=(int)gd.getNextNumber();
 		boolean[] calcAll=new boolean[6];
 		if(imp.getNChannels()>1) calcAll[0]=gd.getNextBoolean();
 		if(imp.getNSlices()>1) calcAll[1]=gd.getNextBoolean();
 		if(imp.getNFrames()>1) calcAll[2]=gd.getNextBoolean();
+		boolean applyFix=gd.getNextBoolean();
 		if(imp.getNChannels()>1) calcAll[3]=gd.getNextBoolean();
 		if(imp.getNSlices()>1) calcAll[4]=gd.getNextBoolean();
 		if(imp.getNFrames()>1) calcAll[5]=gd.getNextBoolean();
@@ -801,95 +805,111 @@ public class Mosaic_Combine_Fix implements PlugIn {
 			if(!title.equals("None"))
 				bmap=WindowManager.getImage(title);
 		}
-		if(isSingleImageMosaic)
-			mosaicBrightnessFix(imp, xRepeatNumber, yRepeatNumber, oImageWidth, oImageHeight, calcAll, bmap);
-		else
-			mosaicBrightnessFixImages(oImageWidth, oImageHeight, calcAll, bmap);
+		if(isSingleImageMosaic){
+			if(bmap==null) bmap=generateMosaicBrightnessMap(imp, xRepeatNumber, yRepeatNumber, oImageWidth, oImageHeight, gaussianBlurRadius, calcAll);
+			if(applyFix) mosaicBrightnessFix(imp, xRepeatNumber, yRepeatNumber, oImageWidth, oImageHeight, calcAll, bmap);
+		}else{
+			if(bmap==null) bmap=generateMosaicBrightnessMapImages(oImageWidth, oImageHeight, gaussianBlurRadius, calcAll);
+			if(applyFix) mosaicBrightnessFixImages(oImageWidth, oImageHeight, calcAll, bmap);
+		}
 	}
 
 	static final int CALC_CH=0, CALC_SL=1, CALC_FR=2, APPLY_CH=3, APPLY_SL=4, APPLY_FR=5;
 
-	public static void mosaicBrightnessFix(ImagePlus imp, int xRepeatNumber, int yRepeatNumber, int oImageWidth, int oImageHeight, boolean[] calcAll, ImagePlus bmap){
-		if(imp==null) {IJ.noImage(); return;}
-		Roi roi = imp.getRoi();
-		if(roi==null) roi=new Roi(0,0,imp.getWidth(),imp.getHeight());
+	public static ImagePlus generateMosaicBrightnessMap(ImagePlus imp, int xRepeatNumber, int yRepeatNumber, int oImageWidth, int oImageHeight, int gaussianBlurRadius, boolean[] calcAll){
+		ImageProcessor bmapip=new FloatProcessor(oImageWidth, oImageHeight);
+		ImagePlus calcimp=imp;
+		//Roi roi = imp.getRoi();
+		//if(roi==null) roi=new Roi(0,0,imp.getWidth(),imp.getHeight());
 		int w=imp.getWidth();
 		int h=imp.getHeight();
 		int xoverlap=((oImageWidth*xRepeatNumber)-w)/(xRepeatNumber-1);
 		int yoverlap=((oImageHeight*yRepeatNumber)-h)/(yRepeatNumber-1);
 		int wov=oImageWidth-xoverlap;
 		int hov=oImageHeight-yoverlap;
-		IJ.log("MBA Start with "+oImageWidth+"x"+oImageHeight+" images for "+xRepeatNumber+" repeats, overlap: "+xoverlap+", "+wov+" pixels per image");
 
-		ImageProcessor bmapip=null;
-		ImagePlus calcimp=imp;
+		IJ.log("Generating Mosaic Brightness Map from "+imp.getTitle()+" with "+oImageWidth+"x"+oImageHeight+" images for "+xRepeatNumber+" repeats, overlap: "+xoverlap+", "+wov+" pixels per image");
 
-		if(bmap==null){
-			
-			bmapip=new FloatProcessor(oImageWidth, oImageHeight);
+		if(calcAll[CALC_SL]){
+			calcimp=AJ_Misc_Plugins.ZProjector(calcimp, ij.plugin.ZProjector.MAX_METHOD, true, 1, imp.getNSlices());
+			if(!calcAll[CALC_FR]) calcimp.setT(imp.getT());
+			if(!calcAll[CALC_CH]) calcimp.setC(imp.getC());
+			IJ.log("MBA ZProjector for calcuation");
+		}
+		if(calcAll[CALC_FR]){
+			calcimp=AJ_Misc_Plugins.TProjector(calcimp, ij.plugin.ZProjector.AVG_METHOD, true, 1, imp.getNFrames());
+			if(!calcAll[CALC_SL]) calcimp.setZ(imp.getZ());
+			if(!calcAll[CALC_CH]) calcimp.setC(imp.getC());
+			IJ.log("MBA TProjector for calcuation");
+		}
+		if(calcAll[CALC_CH]){
+			calcimp=AJ_Misc_Plugins.CProjector(calcimp, ij.plugin.ZProjector.SUM_METHOD, true, true, 1, imp.getNChannels());
+			if(!calcAll[CALC_SL]) calcimp.setZ(imp.getZ());
+			if(!calcAll[CALC_FR]) calcimp.setT(imp.getT());
+			IJ.log("MBA CProjector for calcuation");
+		}
 
-			if(calcAll[CALC_SL]){
-				calcimp=AJ_Misc_Plugins.ZProjector(calcimp, ij.plugin.ZProjector.MAX_METHOD, true, 1, imp.getNSlices());
-				if(!calcAll[CALC_FR]) calcimp.setT(imp.getT());
-				if(!calcAll[CALC_CH]) calcimp.setC(imp.getC());
-				IJ.log("MBA ZProjector for calcuation");
-			}
-			if(calcAll[CALC_FR]){
-				calcimp=AJ_Misc_Plugins.TProjector(calcimp, ij.plugin.ZProjector.AVG_METHOD, true, 1, imp.getNFrames());
-				if(!calcAll[CALC_SL]) calcimp.setZ(imp.getZ());
-				if(!calcAll[CALC_CH]) calcimp.setC(imp.getC());
-				IJ.log("MBA TProjector for calcuation");
-			}
-			if(calcAll[CALC_CH]){
-				calcimp=AJ_Misc_Plugins.CProjector(calcimp, ij.plugin.ZProjector.SUM_METHOD, true, true, 1, imp.getNChannels());
-				if(!calcAll[CALC_SL]) calcimp.setZ(imp.getZ());
-				if(!calcAll[CALC_FR]) calcimp.setT(imp.getT());
-				IJ.log("MBA CProjector for calcuation");
-			}
-
-			ImageProcessor ip=calcimp.getProcessor();
-			boolean is32bit=calcimp.getBitDepth()==32;
-			double max=0;
-			for(int y=0; y<hov;y++){
-				for(int x=0; x<wov; x++){
-					double a=0;
-					int n=0;
-					for(int xr=0;xr<xRepeatNumber; xr++){
-						int x0=x+(xr*wov);
-						for(int yr=0;yr<yRepeatNumber; yr++){
-							int y0=y+(yr*hov);
-							if(is32bit){
-								a+=ip.getf(x0,y0);
-							}else{
-								a+=(double)ip.get(x0,y0);
-							}
-							n++;
+		ImageProcessor ip=calcimp.getProcessor();
+		boolean is32bit=calcimp.getBitDepth()==32;
+		for(int y=0; y<hov;y++){
+			for(int x=0; x<wov; x++){
+				double a=0;
+				int n=0;
+				for(int xr=0;xr<xRepeatNumber; xr++){
+					int x0=x+(xr*wov);
+					for(int yr=0;yr<yRepeatNumber; yr++){
+						int y0=y+(yr*hov);
+						if(is32bit){
+							a+=ip.getf(x0,y0);
+						}else{
+							a+=(double)ip.get(x0,y0);
 						}
+						n++;
 					}
-					a/=n;
-					max=Math.max(max, a);
-					bmapip.setf(x,y, (float)a);
 				}
+				a/=n;
+				bmapip.setf(x,y, (float)a);
 			}
+		}
 
-			for(int y=0; y<hov;y++){
-				for(int x=0; x<wov; x++){
-					float a=bmapip.getf(x,y);
-					if(a>0) bmapip.setf(x,y, (float)(a/max));
-				}
+		//smooth the brightness map to reduce noise before it's used as a divisor
+		new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, gaussianBlurRadius);
+		new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, gaussianBlurRadius);
+		new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, gaussianBlurRadius);
+
+		double max=0;
+		for(int y=0; y<bmapip.getHeight();y++){
+			for(int x=0; x<bmapip.getWidth(); x++){
+				max=Math.max(max, bmapip.getf(x,y));
 			}
+		}
+		for(int y=0; y<hov;y++){
+			for(int x=0; x<wov; x++){
+				float a=bmapip.getf(x,y);
+				bmapip.setf(x,y, (float)(a/max));
+				if(a<0) bmapip.setf(x,y, 0);
+			}
+		}
 
-			//smooth the brightness map to reduce noise before it's used as a divisor
-			new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, 20);
-			new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, 20);
-			new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, 20);
-			
-			bmap= new ImagePlus("Mosaic_Brightness_Map", bmapip);
-			bmap.show();
-			if(calcimp!=imp)calcimp.close();
-		}else bmapip=bmap.getProcessor();
 		
-		IJ.log("MBA Adjusting...");
+		ImagePlus bmap= new ImagePlus("Mosaic_Brightness_Map", bmapip);
+		bmap.show();
+		if(calcimp!=imp)calcimp.close();
+		return bmap;
+	}
+
+	public static void mosaicBrightnessFix(ImagePlus imp, int xRepeatNumber, int yRepeatNumber, int oImageWidth, int oImageHeight, boolean[] calcAll, ImagePlus bmap){
+		if(imp==null) {IJ.noImage(); return;}
+		if(bmap==null) {IJ.error("No brightness map image provided"); return;}
+		int w=imp.getWidth();
+		int h=imp.getHeight();
+		int xoverlap=((oImageWidth*xRepeatNumber)-w)/(xRepeatNumber-1);
+		int yoverlap=((oImageHeight*yRepeatNumber)-h)/(yRepeatNumber-1);
+		int wov=oImageWidth-xoverlap;
+		int hov=oImageHeight-yoverlap;
+		IJ.log("MBA Adjusting image with "+oImageWidth+"x"+oImageHeight+" images for "+xRepeatNumber+" repeats, overlap: "+xoverlap+", "+wov+" pixels per image");
+
+		ImageProcessor bmapip=bmap.getProcessor();
 		int slend=calcAll[APPLY_SL]?imp.getNSlices():imp.getZ(), slst=calcAll[APPLY_SL]?1:imp.getZ();
 		int frend=calcAll[APPLY_FR]?imp.getNFrames():imp.getT(), frst=calcAll[APPLY_FR]?1:imp.getT();
 		int chend=calcAll[APPLY_CH]?imp.getNChannels():imp.getC(), chst=calcAll[APPLY_CH]?1:imp.getC();
@@ -939,64 +959,81 @@ public class Mosaic_Combine_Fix implements PlugIn {
 		return values;
 	}
 
-	public static void mosaicBrightnessFixImages(int imageWidth, int imageHeight, boolean[] calcAll, ImagePlus bmap){
+	public static ImagePlus generateMosaicBrightnessMapImages(int imageWidth, int imageHeight, int gaussianBlurRadius, boolean[] calcAll){
+		ImagePlus bmap=null;
+		ImageProcessor bmapip=new FloatProcessor(imageWidth, imageHeight);
 		int nImages=WindowManager.getImageCount();
 		String[] titles=WindowManager.getImageTitles();
-		ImageProcessor bmapip=null;
-		double max=0;
-		if(bmap==null) {
-			bmapip=new FloatProcessor(imageWidth, imageHeight);
-			for(int i=0; i<nImages; i++){
-				ImagePlus imp=WindowManager.getImage(titles[i]);
-				if(imp==null) continue;
-				ImagePlus calcimp=imp;
-				if(calcAll[CALC_SL]){
-					calcimp=AJ_Misc_Plugins.ZProjector(calcimp, ij.plugin.ZProjector.MAX_METHOD, true, 1, calcimp.getNSlices());
-					if(!calcAll[CALC_FR]) calcimp.setT(imp.getT());
-					if(!calcAll[CALC_CH]) calcimp.setC(imp.getC());
-					IJ.log("MBA ZProjector for calcuation");
-				}
-				if(calcAll[CALC_FR]){
-					calcimp=AJ_Misc_Plugins.TProjector(calcimp, ij.plugin.ZProjector.AVG_METHOD, true, 1, calcimp.getNFrames());
-					if(!calcAll[CALC_SL]) calcimp.setZ(imp.getZ());
-					if(!calcAll[CALC_CH]) calcimp.setC(imp.getC());
-					IJ.log("MBA TProjector for calcuation");
-				}
-				if(calcAll[CALC_CH]){
-					calcimp=AJ_Misc_Plugins.CProjector(calcimp, ij.plugin.ZProjector.SUM_METHOD, true, true, 1, calcimp.getNChannels());
-					if(!calcAll[CALC_SL]) calcimp.setZ(imp.getZ());
-					if(!calcAll[CALC_FR]) calcimp.setT(imp.getT());
-					IJ.log("MBA CProjector for calcuation");
-				}
-				int width=calcimp.getWidth(), height=calcimp.getHeight();
-				boolean is32bit=calcimp.getBitDepth()==32;
-				for(int y=0; y<height;y++){
-					for(int x=0; x<width; x++){
-						double a=0;
-						if(is32bit){
-							a=calcimp.getProcessor().getf(x,y);
-						}else{
-							a=(double)calcimp.getProcessor().get(x,y);
-						}
-						bmapip.setf(x,y, (float)(bmapip.getf(x,y)+a));
-						if(i==(nImages-1)) {
-							bmapip.setf(x,y, (float)(bmapip.getf(x,y)/(double)nImages));
-							max=Math.max(max, a);
-						}
+		IJ.log("Generating Mosaic Brightness Map from "+nImages+" images with "+imageWidth+"x"+imageHeight+" pixels");
+		for(int i=0; i<nImages; i++){
+			ImagePlus imp=WindowManager.getImage(titles[i]);
+			if(imp==null) continue;
+			ImagePlus calcimp=imp;
+			if(calcAll[CALC_SL]){
+				calcimp=AJ_Misc_Plugins.ZProjector(calcimp, ij.plugin.ZProjector.MAX_METHOD, true, 1, calcimp.getNSlices());
+				if(!calcAll[CALC_FR]) calcimp.setT(imp.getT());
+				if(!calcAll[CALC_CH]) calcimp.setC(imp.getC());
+				IJ.log("MBA ZProjector for calcuation");
+			}
+			if(calcAll[CALC_FR]){
+				calcimp=AJ_Misc_Plugins.TProjector(calcimp, ij.plugin.ZProjector.AVG_METHOD, true, 1, calcimp.getNFrames());
+				if(!calcAll[CALC_SL]) calcimp.setZ(imp.getZ());
+				if(!calcAll[CALC_CH]) calcimp.setC(imp.getC());
+				IJ.log("MBA TProjector for calcuation");
+			}
+			if(calcAll[CALC_CH]){
+				calcimp=AJ_Misc_Plugins.CProjector(calcimp, ij.plugin.ZProjector.SUM_METHOD, true, true, 1, calcimp.getNChannels());
+				if(!calcAll[CALC_SL]) calcimp.setZ(imp.getZ());
+				if(!calcAll[CALC_FR]) calcimp.setT(imp.getT());
+				IJ.log("MBA CProjector for calcuation");
+			}
+			int width=calcimp.getWidth(), height=calcimp.getHeight();
+			boolean is32bit=calcimp.getBitDepth()==32;
+			for(int y=0; y<height;y++){
+				for(int x=0; x<width; x++){
+					double a=0;
+					if(is32bit){
+						a=calcimp.getProcessor().getf(x,y);
+					}else{
+						a=(double)calcimp.getProcessor().get(x,y);
+					}
+					bmapip.setf(x,y, (float)(bmapip.getf(x,y)+a));
+					if(i==(nImages-1)) {
+						bmapip.setf(x,y, (float)(bmapip.getf(x,y)/(double)nImages));
 					}
 				}
-				if(calcimp!=imp)calcimp.close();
 			}
-			for(int y=0; y<imageHeight;y++){
-				for(int x=0; x<imageWidth; x++){
-					float a=bmapip.getf(x,y);
-					bmapip.setf(x,y, (float)(a/max));
-				}
-			}
-			bmap= new ImagePlus("Mosaic_Brightness_Map", bmapip);
-			bmap.show();
-		}else bmapip=bmap.getProcessor();
+			if(calcimp!=imp)calcimp.close();
+		}
+		// Blur the brightness map to reduce noise before it's used as a divisor
+		new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, gaussianBlurRadius);
+		new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, gaussianBlurRadius);
+		new ij.plugin.filter.GaussianBlur().blurGaussian(bmapip, gaussianBlurRadius);
 		
+		double max=0;
+		for(int y=0; y<imageHeight;y++){
+			for(int x=0; x<imageWidth; x++){
+				max=Math.max(max, bmapip.getf(x,y));
+			}
+		}
+		for(int y=0; y<imageHeight;y++){
+			for(int x=0; x<imageWidth; x++){
+				double a=bmapip.getf(x,y);
+				bmapip.setf(x,y, (float)(a/max));
+			}
+		}
+		bmap= new ImagePlus("Mosaic_Brightness_Map", bmapip);
+		bmap.show();
+		return bmap;
+	}
+
+	public static void mosaicBrightnessFixImages(int imageWidth, int imageHeight, boolean[] calcAll, ImagePlus bmap){
+		if(bmap==null) {IJ.error("No brightness map image provided"); return;}
+		ImageProcessor bmapip=bmap.getProcessor();
+		
+		int nImages=WindowManager.getImageCount();
+		IJ.log("Adjusting "+nImages+" images with brightness map");
+		String[] titles=WindowManager.getImageTitles();
 		for(int i=0; i<nImages; i++){
 			ImagePlus imp=WindowManager.getImage(titles[i]);
 			if(imp==bmap) continue;
