@@ -65,6 +65,7 @@ public class TwoPhotonImage implements AdjustmentListener{
 	private volatile boolean threadrunning=false;
 	TextWindow tw=null;
 	private String warning="";
+	private String notLoadedStr="Not yet loaded";
 	
 	final int MAXCHS=4;
 	private int xmli=0;
@@ -201,7 +202,7 @@ public class TwoPhotonImage implements AdjustmentListener{
 					ImageStack zst=zimg.getStack();
 					int tps=Math.max(totfrms, totaltps);
 					for(int i=(tpend)*chs;i<tps*chs;i++)
-						zst.addSlice(notLoaded);
+						zst.addSlice(notLoadedStr, notLoaded);
 					zimg.setDimensions(chs, 1, tps);
 					zimg.updateAndRepaintWindow();
 				}
@@ -572,9 +573,10 @@ public class TwoPhotonImage implements AdjustmentListener{
 		String[] locstr=((String)img.getProperty("2p-Location")).split("/");
 		loc=AJ_Utils.parseIntTP(locstr[0]);
 		if(locstr.length>1)locs=AJ_Utils.parseIntTP(locstr[1]);
-		String[]boos=((String)img.getProperty("2p-booleans")).split("/");
+		String[] boos=((String)img.getProperty("2p-booleans")).split("/");
 		dotimes=AJ_Utils.parseIntTP(boos[0])>0;
 		if(boos.length>1)dogamma=AJ_Utils.parseIntTP(boos[1])>0;
+		if(boos.length>2)allocate=AJ_Utils.parseIntTP(boos[2])>0;
 	}
 	
 	ImagePlus zProject(ImagePlus imp, int start, int stop) {
@@ -819,7 +821,7 @@ public class TwoPhotonImage implements AdjustmentListener{
 				for(int c=0;c<achs;c++) {
 					int ind=c+z*chs+t*asls*chs;
 					//IJ.showProgress((double)ind/((double)achs*asls*afrms));
-					if(stack[ind]==notLoaded.getPixels()) {
+					if(labels[ind].contentEquals(notLoadedStr)) {
 						//if(c==0)IJ.log("slice z"+(z+1)+" t"+(t+1)+" is not loaded");
 						if(tpstart==-1)tpstart=t+1;
 						String path=dir+"s_"+(hasC?("C"+String.format("%03d",c+1)):"")+(hasZ?("Z"+String.format("%03d",z+1)):"")+(hasT?("T"+String.format("%03d",t+1)):"")+".tif";
@@ -919,7 +921,7 @@ public class TwoPhotonImage implements AdjustmentListener{
 				for(int sl=0;sl<totalsls;sl++) {
 					for(int ch=0;ch<chs;ch++) {
 						stack[ch+chs*sl+chs*totalsls*fr]=notLoaded.getPixels();
-						slicelabels[ch+chs*sl+chs*totalsls*fr]=null;
+						slicelabels[ch+chs*sl+chs*totalsls*fr]=notLoadedStr;
 					}
 				}
 			}
@@ -928,7 +930,7 @@ public class TwoPhotonImage implements AdjustmentListener{
 					for(int ch=0;ch<chs;ch++) {
 						if(sl>=sls) {
 							stack[ch+chs*sl+chs*totalsls*fr]=notLoaded.getPixels();
-							slicelabels[ch+chs*sl+chs*totalsls*fr]=null;
+							slicelabels[ch+chs*sl+chs*totalsls*fr]=notLoadedStr;
 						}
 						lastz=sl+1;
 						stack[ch+chs*sl+chs*sls*fr]=origstack[ch+chs*sl+chs*sls*(fr-tpstart+1)];
@@ -940,7 +942,7 @@ public class TwoPhotonImage implements AdjustmentListener{
 				for(int sl=0;sl<totalsls;sl++) {
 					for(int ch=0;ch<chs;ch++) {
 						stack[ch+chs*sl+chs*sls*fr]=notLoaded.getPixels();
-						slicelabels[ch+chs*sl+chs*sls*fr]=null;
+						slicelabels[ch+chs*sl+chs*sls*fr]=notLoadedStr;
 					}
 				}
 			}
@@ -964,7 +966,7 @@ public class TwoPhotonImage implements AdjustmentListener{
 		img.setProperty("Info", dir+"\n"+exlocoutput);
 		img.setProperty("2p-Directory", dir);
 		img.setProperty("2p-Location",""+loc+"/"+locs);
-		img.setProperty("2p-booleans", ""+(dotimes?1:0)+"/"+(dogamma?1:0));
+		img.setProperty("2p-booleans", ""+(dotimes?1:0)+"/"+(dogamma?1:0)+"/"+(allocate?1:0));
 		img.setProperty("2p-hasAJZ",""+(hasAJZ?"true":"false"));
 		img.setProperty("2p-starttime", starttimestr);
 		setFrameRange(tpstart,tpend);
