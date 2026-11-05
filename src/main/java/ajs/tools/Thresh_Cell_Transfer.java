@@ -34,7 +34,7 @@ import java.io.File;
  */
 public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener, MouseWheelListener, MouseMotionListener {
 
-	private final static String version="1.5.0";
+	private final static String version="1.6.0";
 	private static boolean DEBUG=false;
 	private static double LIPO_RATIO=0.5;
 	private static int AVERATIO_GREEN_MIN=50;
@@ -138,7 +138,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 	private boolean editing=false, reconfirming=false, skipconfirmation=false, importingFromAllRois=false;
 	private ArrayList<Roi> allRois=null;
 	private static int greench=2, redch=3, xymaskmax=200;
-	private Roi axonRoi=null, duraBVRoi=null, piaBVRoi=null;
+	private Roi[] distanceRois=new Roi[3];
+	private enum DistanceRois{AXON, DURABV, PIABV};
 	private boolean showAllRois=true;
 	private Roi showAllRoi=null, ajtctcpimpAllroi=null;
 	private boolean syncWindows=true, fullZ=false, mb45zoom=false;
@@ -241,7 +242,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		String title=timp.getTitle();
 		String basetitle=title.endsWith(".tif")?title.substring(0,title.length()-4):title;
 		if(basetitle.endsWith("-AJTCT")){
-			basetitle=basetitle.substring(0,basetitle.length()-7);
+			basetitle=basetitle.substring(0,basetitle.length()-6);
 			ImagePlus simp=WindowManager.getImage(basetitle);
 			if(simp==null)simp=WindowManager.getImage(basetitle+".tif");
 			return simp;
@@ -350,14 +351,9 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					e.printStackTrace();
 				}
 				if(roi!=null) rm.addRoi(roi);
-				if(roifilename.contentEquals("axon.roi"))axonRoi=roi;
-				else if(roifilename.contentEquals("bv.roi"))duraBVRoi=roi;
-				else if(roifilename.contentEquals("duraBV.roi"))duraBVRoi=roi;
-				else if(roifilename.contentEquals("piaBV.roi"))piaBVRoi=roi;
-				else if(roifilename.contentEquals("bv-dura.roi"))duraBVRoi=roi;
-				else if(roifilename.contentEquals("bv-pia.roi"))piaBVRoi=roi;
-				else if(roifilename.contentEquals("dura-bv.roi"))duraBVRoi=roi;
-				else if(roifilename.contentEquals("piaB-bv.roi"))piaBVRoi=roi;
+				if(roifilename.contentEquals("axon.roi"))distanceRois[DistanceRois.AXON.ordinal()]=roi;
+				else if(roifilename.toLowerCase().contains("dura") && roifilename.toLowerCase().contains("bv"))distanceRois[DistanceRois.DURABV.ordinal()]=roi;
+				else if(roifilename.toLowerCase().contains("pia") && roifilename.toLowerCase().contains("bv"))distanceRois[DistanceRois.PIABV.ordinal()]=roi;
 			}
 		}
 
@@ -892,8 +888,9 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					} else {
 						curWand[fr-1].updatePoint();
 					}
-					if(!postFirstAccept[pointIndex])updateCurWands(false, false, true);
-					else updateCurWands(false, true, true);
+					updateCurWands(false, true, true);
+					//if(!postFirstAccept[pointIndex])updateCurWands(false, false, true);
+					//else 
 					//tctpanel.setTextLine(TctLines.CURRENTPOINT, "Point:"+(pointIndex+1)+" x:"+curX+" y:"+curY+" z:"+sl+" fr:"+fr);
 					printCurrentPointsInfo();
 				}
@@ -1643,8 +1640,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				}
 				if(!openedHeadings.contains("RedMean"))postData=1;
 				String[] ot=openedText.split("\n")[0].split("\t");
-				if((!openedHeadings.contains("AxonDistance") || ot[getHeadingIndex("AxonDistance")].contentEquals("NA")) && axonRoi!=null)postData+=2;
-				if((!openedHeadings.contains("BVDistance") || ot[getHeadingIndex("BVDistance")].contentEquals("NA")) && (duraBVRoi!=null || piaBVRoi!=null))postData+=4;
+				if((!openedHeadings.contains("AxonDistance") || ot[getHeadingIndex("AxonDistance")].contentEquals("NA")) && distanceRois[DistanceRois.AXON.ordinal()]!=null)postData+=2;
+				if((!openedHeadings.contains("BVDistance") || ot[getHeadingIndex("BVDistance")].contentEquals("NA")) && (distanceRois[DistanceRois.DURABV.ordinal()]!=null || distanceRois[DistanceRois.PIABV.ordinal()]!=null))postData+=4;
 				if((!openedHeadings.contains("CCR2Frame") || (ccr2frames!=null && openedText.split("\n")[ccr2frames[0]-1].split("\t")[getHeadingIndex("CCR2Frame")].contentEquals("false"))))postData+=8;
 				rtw.append(openedText);
 			}else{
@@ -1767,8 +1764,8 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		public void addPostData(int postDataType, boolean onlyIfNaN, int starti, int endi) {
 			if(starti>=endi)return;
 			final int LIPOTYPE=0b0001, AXONTYPE=0b0010, BVTYPE=0b0100, CCR2TYPE=0b1000;
-			if((postDataType & AXONTYPE)==AXONTYPE && axonRoi==null)postDataType-=AXONTYPE;
-			if((postDataType & BVTYPE)==BVTYPE && duraBVRoi==null && piaBVRoi==null)postDataType-=BVTYPE;
+			if((postDataType & AXONTYPE)==AXONTYPE && distanceRois[DistanceRois.AXON.ordinal()]==null)postDataType-=AXONTYPE;
+			if((postDataType & BVTYPE)==BVTYPE && distanceRois[DistanceRois.DURABV.ordinal()]==null && distanceRois[DistanceRois.PIABV.ordinal()]==null)postDataType-=BVTYPE;
 			if((postDataType & CCR2TYPE)==CCR2TYPE && ccr2frames==null)postDataType-=CCR2TYPE;
 			if(postDataType<=0)return;
 			String curlabel="";
@@ -1808,13 +1805,13 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 						data=fillLipoData(slice,frame,roi, data);
 					}
 					if((postDataType & AXONTYPE)==AXONTYPE){
-						if(curlabel.contentEquals("Dura")) data=fillRoiData(axonRoi, roi, data, HEADINGS.AXONDISTANCE);
+						if(curlabel.contentEquals("Dura")) data=fillRoiData(distanceRois[DistanceRois.AXON.ordinal()], roi, data, HEADINGS.AXONDISTANCE);
 						else data.put(HEADINGS.AXONDISTANCE, Double.NaN);
 					}
 					if((postDataType & BVTYPE)==BVTYPE){
 						Roi compareRoi=null;
-						if(curlabel.contentEquals("Dura"))compareRoi=duraBVRoi;
-						else if(curlabel.contentEquals("Pia"))compareRoi=piaBVRoi;
+						if(curlabel.contentEquals("Dura"))compareRoi=distanceRois[DistanceRois.DURABV.ordinal()];
+						else if(curlabel.contentEquals("Pia"))compareRoi=distanceRois[DistanceRois.PIABV.ordinal()];
 						data=fillRoiData(compareRoi,roi, data, HEADINGS.BVDISTANCE);
 					}
 					if((postDataType & CCR2TYPE)==CCR2TYPE){
@@ -2085,81 +2082,15 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			this.setFocusable(false);
 			setLayout(new GridBagLayout());
 			GridBagConstraints c = new GridBagConstraints();
-			
-			final Choice roiDistChoice=new Choice();
-			roiDistChoice.add("Distance Rois");
-			roiDistChoice.add(axonRoi==null?"Add Axon Roi":"--Axon Roi Added--");
-			roiDistChoice.add(duraBVRoi==null?"Add Dura BV Roi":"--Dura BV Roi Added--");
-			roiDistChoice.add(piaBVRoi==null?"Add Pia BV Roi":"--Pia BV Roi Added--");
-
-			ActionListener l=new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					switch(e.getActionCommand()){
-					case "LUT":
-						changeLutType();
-						break;
-					case "askCellLabel":
-						askCellLabel();
-						break;
-					case "gocellcomplete":
-						gocellcomplete=true;
-						break;
-					case "changeWheelFactor":
-						changeWheelFactor(1);
-						((Button)e.getSource()).setLabel("Wheel - "+WHEELFACTORS[wheelfactori]);
-						break;
-					case "updateCurWand":
-						updateCurWands(false, false, false);
-						break;
-					case "Re-confirm All":
-						GenericDialog gd=new GenericDialog("Re-confirm All Cells");
-						gd.addNumericField("Start reevaluate at cell #:",1,0	);
-						gd.addCheckbox("With confirmation?", true);
-						gd.showDialog();
-						if(gd.wasCanceled())break;
-						celln=(int)gd.getNextNumber();
-						skipconfirmation=!gd.getNextBoolean();
-						reconfirming=true;
-						break;
-					case "autoacceptall":
-						autoAcceptAll();
-						break;
-					case "addDirectRoi":
-						addDirectRoi=true;
-						break;
-					case "deleteDirectRoi":
-						deleteDirectRoi();
-						break;
-					case "editRoi":
-						reconfirming=false;
-						editRoi=true;
-						break;
-					case "autothresh":
-						genAutoThresh();
-						break;
-					case "showplot":
-						showPlot();
-						break;
-					case "done":
-						done=true;
-						break;
-					default:
-						break;
-					}
-
-				}
-
-			};
 
 			//c.fill=GridBagConstraints.HORIZONTAL;
 			c.weightx=1; c.weighty=1;
 			c.gridwidth=1; c.gridheight=1;
-			Button b=null;
-			
+
 			c.gridy=0;	// line 1 --------------------- //
 			
 			c.gridx=0; //X=0
+			/** Cell Label */
 			whichlabel=new Choice();
 			whichlabel.setFocusable(false);
 			resetWL();
@@ -2178,150 +2109,354 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				}
 			});
 			add(whichlabel,c);
-			//b=new Button();
-			//b.setFocusable(false);
-			//b.setActionCommand("LUT");
-			//b.setLabel("LUT");
-			//b.addActionListener(l);
-			//if(simp.isComposite())b.setEnabled(false);
-			//add(b,c);
 			
 			c.gridx++; //1
-			b=new Button();
-			b.setFocusable(false);
-			b.setActionCommand("editRoi");
-			b.setLabel("Edit Existing Roi");
-			b.addActionListener(l);
-			add(b,c);
-			
-			c.gridx++; //2
-			b=new Button();
-			b.setFocusable(false);
-			b.setActionCommand("changeWheelFactor");
-			b.setLabel("Wheel - "+WHEELFACTORS[wheelfactori]);
-			b.addActionListener(l);
-			add(b,c);
-			
-			c.gridx++; //3
-			b=new Button();
-			b.setFocusable(false);
-			b.setActionCommand("gocellcomplete");
-			b.setLabel("Cell complete");
-			b.addActionListener(l);
-			add(b,c);
-			
-			c.gridx++; //4
-			roiDistChoice.setFocusable(false);
-			roiDistChoice.addItemListener(new ItemListener() {
-				@Override
-				public void itemStateChanged(ItemEvent e) {
-					final int si=roiDistChoice.getSelectedIndex();
-					if(si==0)return;
-					String whichRoi="Axon Roi";
-					if(si==2) whichRoi="Dura BV Roi";
-					else if(si==3) whichRoi="Pia BV Roi";
+			/** Options Menu **/
+			Button dropDownMenu=new Button("Options ▼");
+			dropDownMenu.setFocusable(false);
+			PopupMenu options=new PopupMenu();
+			{
+				MenuItem mi=new MenuItem("ScrollWheel Thresh Adj Factor - "+WHEELFACTORS[wheelfactori]);
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e){
+						changeWheelFactor(1);
+						((MenuItem)e.getSource()).setLabel("ScrollWheel Thresh Adj Factor - "+WHEELFACTORS[wheelfactori]);
+					}
+				});
+				CheckboxMenuItem cbmi=new CheckboxMenuItem("Auto-change threshs per Frame", !(threshMultiplier==null));
+				cbmi.addItemListener(new ItemListener() {
+					@Override
+					public void itemStateChanged(ItemEvent e) {
+						genAutoThresh();
+						((CheckboxMenuItem)e.getSource()).setState(threshMultiplier!=null);
+					}
+				});
+				cbmi=new CheckboxMenuItem("Auto Accept", autoAccept);
+				cbmi.addItemListener(new ItemListener() {
+					@Override
+					public void itemStateChanged(ItemEvent e) {
+						autoAccept=!autoAccept;
+						((CheckboxMenuItem)e.getSource()).setState(autoAccept);
+					}
+				});
+				options.add(cbmi);
+				mi=new MenuItem("Show Plot");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						showPlot();
+					}
+				});
+				options.add(mi);
+				
+				Menu distanceRois=new Menu("Distance Rois");
+				ActionListener roiAction=new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {;
+						((MenuItem)e.getSource()).setLabel(askDistanceRoi(e.getActionCommand()));
+					}
+				};
+				mi=new MenuItem("Add Axon Roi");
+				mi.addActionListener(roiAction);
+				distanceRois.add(mi);
+				mi=new MenuItem("Add Dura BV Roi");
+				mi.addActionListener(roiAction);
+				distanceRois.add(mi);
+				mi=new MenuItem("Add Pia BV Roi");
+				mi.addActionListener(roiAction);
+				distanceRois.add(mi);
+				options.add(distanceRois);
+				
+				autosavecbmi=new CheckboxMenuItem("Auto Save", autoSave);
+				autosavecbmi.addItemListener(new ItemListener() {
+					@Override
+					public void itemStateChanged(ItemEvent e) {
+						autoSave=!autoSave;
+						autosavecbmi.setState(autoSave);
+					}
+				});
+				options.add(autosavecbmi);
 
-					ImagePlus roiimp=IJ.createImage(whichRoi, "8bit black", simp.getWidth(), simp.getHeight(), 1);
-					roiimp.show();
-					
-					if(roiDistChoice.getSelectedItem().startsWith("--")) {
-						if(si==1)roiimp.setRoi(axonRoi);
-						else if(si==2)roiimp.setRoi(duraBVRoi);
-						else roiimp.setRoi(piaBVRoi);
-						YesNoCancelDialog ync=new YesNoCancelDialog(null,"Distance Rois","Remove "+whichRoi+"?");
-						if(ync.yesPressed()) {
-							if(si==1)axonRoi=null;
-							else if(si==2)duraBVRoi=null;
-							else piaBVRoi=null;
+				cbmi=new CheckboxMenuItem("Sync Zoom", syncWindows);
+				cbmi.addItemListener(new ItemListener() {
+					@Override
+					public void itemStateChanged(ItemEvent e) {
+						syncWindows=!syncWindows;
+						((CheckboxMenuItem)e.getSource()).setState(syncWindows);
+					}
+				});
+				options.add(cbmi);
+
+				cbmi=new CheckboxMenuItem("First Curwand in-thread", inThreadCurwand.get());
+				cbmi.addItemListener(new ItemListener() {
+					@Override
+					public void itemStateChanged(ItemEvent e) {
+						inThreadCurwand.set(!inThreadCurwand.get());
+						((CheckboxMenuItem)e.getSource()).setState(inThreadCurwand.get());
+					}
+				});
+				options.add(cbmi);
+
+				cbmi=new CheckboxMenuItem("Mouse B4-5 Zoom?", false);
+				cbmi.addItemListener(new ItemListener() {
+					@Override
+					public void itemStateChanged(ItemEvent e) {
+						mb45zoom=!mb45zoom;
+						CheckboxMenuItem citem=((CheckboxMenuItem)e.getSource());
+						citem.setState(mb45zoom);
+					}
+				});
+				options.add(cbmi);
+
+				Menu zmaxSubMenu=new Menu("Z-Max Options");
+				CheckboxMenuItem azcbmi=new CheckboxMenuItem("Auto go to closest z-maximum", checkZmax==2);
+				CheckboxMenuItem zcbmi=new CheckboxMenuItem("Check for closest z-maximum", checkZmax>0);
+				azcbmi.addItemListener(new ItemListener() {
+					@Override
+					public void itemStateChanged(ItemEvent e) {
+						if(checkZmax==1) {
+							checkZmax=2;
+						} else if(checkZmax==2) {
+							checkZmax=1;
 						}
-					}else {
-						GenericDialog gd=new GenericDialog("Distance Rois");
-						gd.addMessage("Add new "+whichRoi);
-						RoiManager roiManager=RoiManager.getRoiManager();
-						int openRois=roiManager.getCount();
-						if(openRois>1) {
-							String[] rmis=new String[openRois+1];
-							rmis[0]="No";
-							for(int i=0; i<openRois; i++)rmis[i+1]=""+(i+1);
-							gd.addChoice("Add from RoiManager:", rmis, "No");
-							((java.awt.Choice)gd.getChoices().get(0)).addItemListener(new ItemListener() {
-								@Override
-								public void itemStateChanged(ItemEvent e) {
-									int selec=gd.getNextChoiceIndex()-1;
-									if(selec>-1) {
-										Roi oproi=roiManager.getRoi(selec);
-										roiimp.setRoi(oproi);
-										roiimp.updateAndDraw();
-									}
-								}
-							});
-						}
-						gd.addButton("Add from file", new ActionListener() {
-							@Override
-							public void actionPerformed(ActionEvent e) {
-								OpenDialog od = new OpenDialog("Open", "");
-								String directory = od.getDirectory();
-								String name = od.getFileName();
-								if (name!=null) {
-									String path = directory+name;
-									WindowManager.setCurrentWindow(simp.getWindow());
-									Roi temproi=simp.getRoi();
-									Roi oproi=null;
-									if(name.endsWith(".roi")) {
-										IJ.open(path);
-										IJ.wait(1000);
-										oproi=simp.getRoi();
-										simp.setRoi(temproi);
-									}else {
-										ImagePlus tempimp=IJ.openImage(path);
-										IJ.run("Create Selection");
-										IJ.wait(1000);
-										oproi=tempimp.getRoi();
-										tempimp.close();
-									}
-									if(oproi!=null) {
-										roiManager.addRoi(oproi);
-										roiimp.setRoi(oproi);
-										roiimp.updateAndDraw();
-										if(si==1)axonRoi=oproi;
-										else if(si==2)duraBVRoi=oproi;
-										else piaBVRoi=oproi;
-									}else IJ.log("Roi open was not successful, no roi found");
-								}
-							}
-						});
+						azcbmi.setState(azcbmi.getState());
+						zcbmi.setState(checkZmax>0);
+					}
+				});
+				zcbmi.addItemListener(new ItemListener() {
+					@Override
+					public void itemStateChanged(ItemEvent e) {
+						if(checkZmax==0) {
+							checkZmax=1;
+							if(azcbmi.getState())checkZmax=2;
+						}else checkZmax=0;
+						zcbmi.setState(checkZmax>0);
+					}
+				});
+				zmaxSubMenu.add(zcbmi);
+				zmaxSubMenu.add(azcbmi);
+				options.add(zmaxSubMenu);
+
+				mi=new MenuItem("Show/Hide Wand Image");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						showHideWandImage();
+					}
+				});
+				options.add(mi);
+
+				mi=new MenuItem("Generate AJTCT SingleStack");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						genSingleStack();
+					}
+				});
+				options.add(mi);
+
+				mi=new MenuItem("Save MDInfo File");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						saveMDInfo();
+					}
+				});
+				options.add(mi);
+
+				mi=new MenuItem("Set mask max surround");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						GenericDialog gd=new GenericDialog("Set mask max surround");
+						gd.addNumericField("Maximum area around roi:", xymaskmax, 0);
 						gd.showDialog();
-						if(!gd.wasCanceled()) {
-							Roi oproi=roiimp.getRoi();
-							if(si==1)axonRoi=oproi;
-							else if(si==2)duraBVRoi=oproi;
-							else piaBVRoi=oproi;
+						if (gd.wasOKed()) {
+							xymaskmax = (int) gd.getNextNumber();
 						}
 					}
-					roiimp.close();
-					roiDistChoice.removeAll();
-					roiDistChoice.add("Distance Rois");
-					roiDistChoice.add(axonRoi==null?"Add Axon Roi":"--Axon Roi Added--");
-					roiDistChoice.add(duraBVRoi==null?"Add Dura BV Roi":"--Dura BV Roi Added--");
-					roiDistChoice.add(piaBVRoi==null?"Add Pia BV Roi":"--Pia BV Roi Added--");
+				});
+				options.add(mi);
+
+				mi=new MenuItem("Set CCR2 Frames");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						setCCR2Frames();
+					}
+				});
+				options.add(mi);
+
+				mi=new MenuItem("Copy Previous Roi");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						int fr=simp.getFrame()-1;
+						if(curWand[fr]==null) curWand[fr]=new AutoWandRoi(simp.getC(), simp.getZ(), fr+1);
+						curWand[fr].setPrevRoi();
+						curWand[fr].showBoth();
+					}
+				});
+				options.add(mi);
+
+				mi=new MenuItem("AJTCTcp diff overlay");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						if(soverlay!=null)soverlay.remove(ajtctcpimpAllroi);
+						ajtcpcpDiffOverlay();
+						if(soverlay!=null)soverlay.add(ajtctcpimpAllroi);
+						simp.updateAndDraw();
+					}
+				});
+				options.add(mi);
+
+				cbmi=new CheckboxMenuItem("Log DEBUG", DEBUG);
+				cbmi.addItemListener(new ItemListener() {
+					@Override
+					public void itemStateChanged(ItemEvent e) {
+						DEBUG=!DEBUG;
+						((CheckboxMenuItem)e.getSource()).setState(DEBUG);
+					}
+				});
+				options.add(cbmi);
+			}
+			// Finish adding options to the menu and add it to the button
+			dropDownMenu.add(options);
+			dropDownMenu.addActionListener(new ActionListener() {
+				@Override
+				public void actionPerformed(ActionEvent e) {
+					options.show(dropDownMenu, 0, dropDownMenu.getHeight());
 				}
 			});
-			add(roiDistChoice,c);
+			add(dropDownMenu,c);
 			
-			c.gridy++; //1 ---- line 2 ----- //
-			c.gridx=0;
-			b=new Button();
-			b.setFocusable(false);
-			b.setActionCommand("updateCurWand");
-			b.setLabel("Update curWand");
-			b.addActionListener(l);
-			add(b,c);
-			c.gridx++; //1
-			b=new Button("Re-confirm All");
-			b.setFocusable(false);
-			b.addActionListener(l);
-			add(b,c);
 			c.gridx++; //2
+			/** Roi editing options */
+			Button editDropDownMenu=new Button("Roi editing ▼");
+			editDropDownMenu.setFocusable(false);
+			PopupMenu editOptions=new PopupMenu();
+			{
+				MenuItem mi=new MenuItem("Update curWand");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e){
+						updateCurWands(false, false, false);
+					}
+				});
+				editOptions.add(mi);
+				
+				mi=new MenuItem("Edit Existing Roi");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e){
+						reconfirming=false;
+						editRoi=true;
+					}
+				});
+				editOptions.add(mi);
+				
+				mi=new MenuItem("Add Direct Roi");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e){
+						addDirectRoi=true;
+					}
+				});
+				editOptions.add(mi);
+				
+				mi=new MenuItem("Delete Direct Roi");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e){
+						deleteDirectRoi();
+					}
+				});
+				editOptions.add(mi);
+				
+				mi=new MenuItem("Re-confirm All Rois");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e){
+						GenericDialog gd=new GenericDialog("Re-confirm All Cells");
+						gd.addNumericField("Start reevaluate at cell #:",1,0	);
+						gd.addCheckbox("With confirmation?", true);
+						gd.showDialog();
+						if(gd.wasCanceled())return;
+						celln=(int)gd.getNextNumber();
+						skipconfirmation=!gd.getNextBoolean();
+						reconfirming=true;
+					}
+				});
+				editOptions.add(mi);
+
+				mi=new MenuItem("Import All Rois from Manager");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						importAllRoisFromManager();
+					}
+				});
+				editOptions.add(mi);
+
+				mi=new MenuItem("Recalculate A/BV Distances");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						recalcABV.set(1);
+						log("Recalculating A/BV distances...");
+					}
+				});
+				editOptions.add(mi);
+
+				mi=new MenuItem("Recalculate A/BV Distances NaN only");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						recalcABV.set(2);
+						log("Recalculating A/BV Distances for NaN values only...");
+					}
+				});
+				editOptions.add(mi);
+
+				mi=new MenuItem("Recalculate Red channel data");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						java.awt.EventQueue.invokeLater(new Runnable() {
+							@Override
+							public void run() {
+								log("Recalculating Red Channel data...");
+								results.addPostData( 1);
+							}
+						});
+					}
+				});
+				editOptions.add(mi);
+
+				CheckboxMenuItem cbmi=new CheckboxMenuItem("Show All Rois", showAllRois);
+				cbmi.addItemListener(new ItemListener() {
+					@Override
+					public void itemStateChanged(ItemEvent e) {
+						showAllRois=!showAllRois;
+						((CheckboxMenuItem)e.getSource()).setState(showAllRois);
+					}
+				});
+				editOptions.add(cbmi);
+			}
+			// Finish adding options to the menu and add it to the button
+			editDropDownMenu.add(editOptions);
+			editDropDownMenu.addActionListener(new ActionListener() {
+				@Override
+				public void actionPerformed(ActionEvent e) {
+					editOptions.show(editDropDownMenu, 0, editDropDownMenu.getHeight());
+				}
+			});
+			add(editDropDownMenu,c);
+			
+			c.gridx++; //3
+			/** Which point **/
 			whichPoint=new Choice();
 			whichPoint.setFocusable(false);
 			resetWP();
@@ -2374,275 +2509,51 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 				}
 			});
 			add(whichPoint, c);
-			c.gridx++; //2
-			b=new Button();
-			b.setFocusable(false);
-			b.setActionCommand("autoacceptall");
-			b.setLabel("Accept all frames");
-			b.addActionListener(l);
-			add(b,c);
-			c.gridx++; //3
-			b=new Button();
-			b.setFocusable(false);
-			b.setActionCommand("done");
-			b.setLabel("Stop TCT");
-			b.addActionListener(l);
-			add(b,c);
-			c.gridx=0;
-			c.gridy++;
-			Button dropDownMenu=new Button("Options ▼");
-			dropDownMenu.setFocusable(false);
-			PopupMenu options=new PopupMenu();
-			autosavecbmi=new CheckboxMenuItem("Auto Save", autoSave);
-			autosavecbmi.addItemListener(new ItemListener() {
-				@Override
-				public void itemStateChanged(ItemEvent e) {
-					autoSave=!autoSave;
-					autosavecbmi.setState(autoSave);
-				}
-			});
-			options.add(autosavecbmi);
-			CheckboxMenuItem cbmi=new CheckboxMenuItem("Show All Rois", showAllRois);
-			cbmi.addItemListener(new ItemListener() {
-				@Override
-				public void itemStateChanged(ItemEvent e) {
-					showAllRois=!showAllRois;
-					((CheckboxMenuItem)e.getSource()).setState(showAllRois);
-				}
-			});
-			options.add(cbmi);
-			cbmi=new CheckboxMenuItem("Sync Zoom", syncWindows);
-			cbmi.addItemListener(new ItemListener() {
-				@Override
-				public void itemStateChanged(ItemEvent e) {
-					syncWindows=!syncWindows;
-					((CheckboxMenuItem)e.getSource()).setState(syncWindows);
-				}
-			});
-			options.add(cbmi);
-			cbmi=new CheckboxMenuItem("Auto Accept", autoAccept);
-			cbmi.addItemListener(new ItemListener() {
-				@Override
-				public void itemStateChanged(ItemEvent e) {
-					autoAccept=!autoAccept;
-					((CheckboxMenuItem)e.getSource()).setState(autoAccept);
-				}
-			});
-			options.add(cbmi);
-			Menu zmaxSubMenu=new Menu("Z-Max Options");
-			options.add(zmaxSubMenu);
-			CheckboxMenuItem azcbmi=new CheckboxMenuItem("Auto go to closest z-maximum", checkZmax==2);
-			CheckboxMenuItem zcbmi=new CheckboxMenuItem("Check for closest z-maximum", checkZmax>0);
-			azcbmi.addItemListener(new ItemListener() {
-				@Override
-				public void itemStateChanged(ItemEvent e) {
-					if(checkZmax==1) {
-						checkZmax=2;
-					} else if(checkZmax==2) {
-						checkZmax=1;
-					}
-					azcbmi.setState(azcbmi.getState());
-					zcbmi.setState(checkZmax>0);
-				}
-			});
-			zcbmi.addItemListener(new ItemListener() {
-				@Override
-				public void itemStateChanged(ItemEvent e) {
-					if(checkZmax==0) {
-						checkZmax=1;
-						if(azcbmi.getState())checkZmax=2;
-					}else checkZmax=0;
-					zcbmi.setState(checkZmax>0);
-				}
-			});
-			zmaxSubMenu.add(zcbmi);
-			zmaxSubMenu.add(azcbmi);
-			cbmi=new CheckboxMenuItem("Mouse B4-5 Zoom?", false);
-			cbmi.addItemListener(new ItemListener() {
-				@Override
-				public void itemStateChanged(ItemEvent e) {
-					mb45zoom=!mb45zoom;
-					CheckboxMenuItem citem=((CheckboxMenuItem)e.getSource());
-					citem.setState(mb45zoom);
-				}
-			});
-			options.add(cbmi);
-			cbmi=new CheckboxMenuItem("Log DEBUG", DEBUG);
-			cbmi.addItemListener(new ItemListener() {
-				@Override
-				public void itemStateChanged(ItemEvent e) {
-					DEBUG=!DEBUG;
-					((CheckboxMenuItem)e.getSource()).setState(DEBUG);
-				}
-			});
-			options.add(cbmi);
-			cbmi=new CheckboxMenuItem("First Curwand in-thread", inThreadCurwand.get());
-			cbmi.addItemListener(new ItemListener() {
-				@Override
-				public void itemStateChanged(ItemEvent e) {
-					inThreadCurwand.set(!inThreadCurwand.get());
-					((CheckboxMenuItem)e.getSource()).setState(inThreadCurwand.get());
-				}
-			});
-			options.add(cbmi);
-			MenuItem mi=new MenuItem("Recalculate A/BV Distances");
-			mi.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					recalcABV.set(1);
-					log("Recalculating A/BV distances...");
-				}
-			});
-			options.add(mi);
-			mi=new MenuItem("Recalculate A/BV Distances NaN only");
-			mi.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					recalcABV.set(2);
-					log("Recalculating A/BV Distances for NaN values only...");
-				}
-			});
-			options.add(mi);
-			mi=new MenuItem("Recalculate Red channel data");
-			mi.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					java.awt.EventQueue.invokeLater(new Runnable() {
-						@Override
-						public void run() {
-							log("Recalculating Red Channel data...");
-							results.addPostData( 1);
-						}
-					});
-				}
-			});
-			options.add(mi);
-			mi=new MenuItem("Convert AJTCT to Glasbey Inverted LUT");
-			mi.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					java.awt.EventQueue.invokeLater(new Runnable() {
-						@Override
-						public void run() {
-							log("Converting AJTCT to Glasbey Inverted LUT...");
-							convertTCTtoGlasbey(timp, simp.getCalibration().pixelWidth);
-						}
-					});
-				}
-			});
-			options.add(mi);
-			mi=new MenuItem("Generate AJTCT SingleStack");
-			mi.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					genSingleStack();
-				}
-			});
-			options.add(mi);
-			mi=new MenuItem("Save MDInfo File");
-			mi.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					saveMDInfo();
-				}
-			});
-			options.add(mi);
-			mi=new MenuItem("Show/Hide Wand Image");
-			mi.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					showHideWandImage();
-				}
-			});
-			options.add(mi);
-			mi=new MenuItem("Set mask max surround");
-			mi.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					GenericDialog gd=new GenericDialog("Set mask max surround");
-					gd.addNumericField("Maximum area around roi:", xymaskmax, 0);
-					gd.showDialog();
-					if (gd.wasOKed()) {
-						xymaskmax = (int) gd.getNextNumber();
-					}
-				}
-			});
-			options.add(mi);
-			mi=new MenuItem("Set CCR2 Frames");
-			mi.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					setCCR2Frames();
-				}
-			});
-			options.add(mi);
-			mi=new MenuItem("Copy Previous Roi");
-			mi.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					int fr=simp.getFrame()-1;
-					if(curWand[fr]==null) curWand[fr]=new AutoWandRoi(simp.getC(), simp.getZ(), fr+1);
-					curWand[fr].setPrevRoi();
-					curWand[fr].showBoth();
-				}
-			});
-			options.add(mi);
-			mi=new MenuItem("AJTCTcp diff overlay");
-			mi.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					if(soverlay!=null)soverlay.remove(ajtctcpimpAllroi);
-					ajtcpcpDiffOverlay();
-					if(soverlay!=null)soverlay.add(ajtctcpimpAllroi);
-					simp.updateAndDraw();
-				}
-			});
-			options.add(mi);
-			mi=new MenuItem("Import All Rois from Manager");
-			mi.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					importAllRoisFromManager();
-				}
-			});
-			options.add(mi);
-			dropDownMenu.add(options);
-			dropDownMenu.addActionListener(new ActionListener() {
-				@Override
-				public void actionPerformed(ActionEvent e) {
-					options.show(dropDownMenu, 0, dropDownMenu.getHeight());
-				}
-			});
-			add(dropDownMenu,c);
-			c.gridx++;
-			b=new Button();
-			b.setFocusable(false);
-			b.setActionCommand("addDirectRoi");
-			b.setLabel("Add direct ROI");
-			b.addActionListener(l);
-			add(b,c);
-			c.gridx++;
-			b=new Button();
-			b.setFocusable(false);
-			b.setActionCommand("deleteDirectRoi");
-			b.setLabel("Delete Direct Roi");
-			b.addActionListener(l);
-			add(b,c);
-			c.gridx++;
-			b=new Button();
-			b.setFocusable(false);
-			b.setActionCommand("autothresh");
-			b.setLabel("AutoThresh");
-			b.addActionListener(l);
-			add(b,c);
-			c.gridx++;
-			b=new Button("Show Plot");
-			b.setFocusable(false);
-			b.setActionCommand("showplot");
-			b.addActionListener(l);
-			add(b,c);
 
-			c.gridwidth=5; c.gridx=0; c.gridy++; //2
+			c.gridx++; //4
+			/* Accept/Stop options */
+			Button acceptDropDownMenu=new Button("Accept/Stop ▼");
+			acceptDropDownMenu.setFocusable(false);
+			PopupMenu acceptOptions=new PopupMenu();
+			{
+				MenuItem mi=new MenuItem("Cell Complete");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e){
+						gocellcomplete=true;
+					}
+				});
+				acceptOptions.add(mi);
+
+				mi=new MenuItem("Accept All Frames");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e){
+						autoAcceptAll();
+					}
+				});
+				acceptOptions.add(mi);
+
+				mi=new MenuItem("Quit");
+				mi.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e){
+						done=true;
+					}
+				});
+				acceptOptions.add(mi);
+			}
+			// Finish adding options to the menu and add it to the button
+			acceptDropDownMenu.add(acceptOptions);
+			acceptDropDownMenu.addActionListener(new ActionListener() {
+				@Override
+				public void actionPerformed(ActionEvent e) {
+					acceptOptions.show(acceptDropDownMenu, 0, acceptDropDownMenu.getHeight());
+				}
+			});
+			add(acceptDropDownMenu,c);
+
+			c.gridwidth=5; c.gridx=0; c.gridy++; //2 row
 			ta=new TextArea("",15,105,TextArea.SCROLLBARS_NONE);
 			ta.setFont(new Font(Font.MONOSPACED,Font.PLAIN,12));
 			ta.setEditable(false);
@@ -3158,6 +3069,90 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 		int fr=simp.getT()+1;
 		if(fr>simp.getNFrames())fr=1;
 		simp.setPosition(simp.getC(), simp.getZ(), fr);
+	}
+
+	public String askDistanceRoi(String whichRoi){
+		final String[] roiNames=new String[] {"Axon Roi", "Dura BV Roi", "Pia BV Roi"};
+		int wi=0;
+		for(; wi<roiNames.length; wi++) {
+			if(whichRoi.contains(roiNames[wi])) {
+				break;
+			}
+		}
+		final int si=wi;
+		ImagePlus roiimp=IJ.createImage(whichRoi, "8bit black", simp.getWidth(), simp.getHeight(), 1);
+		roiimp.show();
+
+		if(whichRoi.startsWith("--")) {
+			roiimp.setRoi(distanceRois[si]);
+			YesNoCancelDialog ync=new YesNoCancelDialog(null,"Distance Rois","Remove "+whichRoi+"?");
+			if(ync.yesPressed()) {
+				distanceRois[si]=null;
+			}
+		}else{
+			GenericDialog gd=new GenericDialog("Distance Rois");
+			gd.addMessage("Add new "+whichRoi);
+			RoiManager roiManager=RoiManager.getRoiManager();
+			int openRois=roiManager.getCount();
+			if(openRois>1) {
+				String[] rmis=new String[openRois+1];
+				rmis[0]="No";
+				for(int i=0; i<openRois; i++)rmis[i+1]=""+(i+1);
+				gd.addChoice("Add from RoiManager:", rmis, "No");
+				((java.awt.Choice)gd.getChoices().get(0)).addItemListener(new ItemListener() {
+					@Override
+					public void itemStateChanged(ItemEvent e) {
+						int selec=gd.getNextChoiceIndex()-1;
+						if(selec>-1) {
+							Roi oproi=roiManager.getRoi(selec);
+							roiimp.setRoi(oproi);
+							roiimp.updateAndDraw();
+						}
+					}
+				});
+			}
+			gd.addButton("Add from file", new ActionListener() {
+				@Override
+				public void actionPerformed(ActionEvent e) {
+					OpenDialog od = new OpenDialog("Open", "");
+					String directory = od.getDirectory();
+					String name = od.getFileName();
+					if (name!=null) {
+						String path = directory+name;
+						WindowManager.setCurrentWindow(simp.getWindow());
+						Roi temproi=simp.getRoi();
+						Roi oproi=null;
+						if(name.endsWith(".roi")) {
+							IJ.open(path);
+							IJ.wait(1000);
+							oproi=simp.getRoi();
+							simp.setRoi(temproi);
+						}else {
+							ImagePlus tempimp=IJ.openImage(path);
+							IJ.run("Create Selection");
+							IJ.wait(1000);
+							oproi=tempimp.getRoi();
+							tempimp.close();
+						}
+						if(oproi!=null) {
+							roiManager.addRoi(oproi);
+							roiimp.setRoi(oproi);
+							roiimp.updateAndDraw();
+							distanceRois[si]=oproi;
+						}else IJ.log("Roi open was not successful, no roi found");
+					}
+				}
+			});
+			gd.showDialog();
+			if(!gd.wasCanceled()) {
+				Roi oproi=roiimp.getRoi();
+				distanceRois[si]=oproi;
+			}
+		}
+		roiimp.close();
+		if(distanceRois[si]!=null) 
+			return "--"+roiNames[si]+" Added--";
+		else return "Add "+roiNames[si];
 	}
 
 	public void finish(){
@@ -4197,10 +4192,10 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 			Roi bvRoi=null;
 			Roi axonRoiduraonly=null;
 			if(cellLabel.contentEquals("Dura")){
-				bvRoi=duraBVRoi;
-				axonRoiduraonly=axonRoi;
+				bvRoi=distanceRois[DistanceRois.DURABV.ordinal()];
+				axonRoiduraonly=distanceRois[DistanceRois.AXON.ordinal()];
 			}
-			else if(cellLabel.contentEquals("Pia"))bvRoi=piaBVRoi;
+			else if(cellLabel.contentEquals("Pia"))bvRoi=distanceRois[DistanceRois.PIABV.ordinal()];
 			output=fillRoiData(axonRoiduraonly, roi, output, HEADINGS.AXONDISTANCE);
 			output=fillRoiData(bvRoi, roi, output, HEADINGS.BVDISTANCE);
 			output.put(HEADINGS.CCR2FRAME, ""+isCCR2Frame(fr));
