@@ -189,11 +189,21 @@ public class AJ_Misc_Plugins implements PlugIn {
 		}
 		endImage.setCalibration(imp.getCalibration());
 		ajs.tools.Slicelabel_Transfer.transferSliceLabels(imp, endImage);
+		String info="" + imp.getInfoProperty();
+		if(!info.contentEquals("") && !info.endsWith("\n"))info+="\n";
+		info+="TProjector: "+stfr+"-"+endfr+"/"+imp.getNFrames()+" method: "+method;
+		endImage.setProperty("Info", info);
 		return endImage;
 	}
 
 	public static ImagePlus ZProjector(ImagePlus imp, int method, boolean doallfrms, int stsl, int endsl) {
-		return TwoPhotonImage.zProject(imp, stsl, endsl, doallfrms, method);
+		ImagePlus zimp=TwoPhotonImage.zProject(imp, stsl, endsl, doallfrms, method);
+		ajs.tools.Slicelabel_Transfer.transferSliceLabels(imp, zimp);
+		String info="" + imp.getInfoProperty();
+		if(!info.contentEquals("") && !info.endsWith("\n"))info+="\n";
+		info+="ZProjector: "+stsl+"-"+endsl+"/"+imp.getNSlices()+" method: "+method;
+		zimp.setProperty("Info", info);
+		return zimp;
 	}
 
 	public static ImagePlus CProjector(ImagePlus imp, int method, boolean doallsls, boolean doallfrms, int stch, int endch) {
@@ -231,6 +241,10 @@ public class AJ_Misc_Plugins implements PlugIn {
 		endImage.setDimensions(1, doallsls?sls:1, doallfrms?frms:1);
 		endImage.setCalibration(imp.getCalibration());
 		ajs.tools.Slicelabel_Transfer.transferSliceLabels(imp, endImage);
+		String info="" + imp.getInfoProperty();
+		if(!info.contentEquals("") && !info.endsWith("\n"))info+="\n";
+		info+="CProjector: "+stch+"-"+endch+"/"+imp.getNChannels()+" method: "+method;
+		endImage.setProperty("Info", info);
 		return endImage;
 	}
 	
