@@ -888,7 +888,7 @@ public class Thresh_Cell_Transfer implements PlugIn, MouseListener, KeyListener,
 					} else {
 						curWand[fr-1].updatePoint();
 					}
-					updateCurWands(false, true, true);
+					updateCurWands(false, false, true);
 					//if(!postFirstAccept[pointIndex])updateCurWands(false, false, true);
 					//else 
 					//tctpanel.setTextLine(TctLines.CURRENTPOINT, "Point:"+(pointIndex+1)+" x:"+curX+" y:"+curY+" z:"+sl+" fr:"+fr);
